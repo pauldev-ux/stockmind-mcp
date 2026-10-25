@@ -190,6 +190,7 @@ def _fila_a_movimiento(fila: dict[str, str]) -> MovimientoInventario:
 
 class CsvExcelConnector(InventarioConnector):
     nombre = "csv"
+    nombre_visible = "CSV/Excel"
 
     def __init__(self, data_dir: Path, formato: Formato = "csv"):
         self.data_dir = Path(data_dir)

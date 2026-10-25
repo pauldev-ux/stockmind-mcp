@@ -21,6 +21,11 @@ from stockmind.domain.modelos import (
 class InventarioConnector(ABC):
     #: Nombre corto del conector, se usa en la auditoría.
     nombre: str = "desconocido"
+    #: Nombre para mostrar en los mensajes al usuario.
+    nombre_visible: str = "el ERP"
+    #: False en conectores de solo lectura: el servicio rechaza las escrituras
+    #: antes de validar o emitir un token.
+    admite_escritura: bool = True
 
     @abstractmethod
     def buscar_productos(self, texto: str, limite: int = 20) -> list[Producto]:

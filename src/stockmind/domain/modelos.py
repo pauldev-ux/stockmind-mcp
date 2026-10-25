@@ -26,6 +26,18 @@ class Sentido(StrEnum):
     NEGATIVO = "-"
 
 
+class Lote(BaseModel):
+    codigo: str
+    # Número visible para el usuario (lote del proveedor o n.º de documento); puede repetirse.
+    numero: str | None = None
+    producto_id: str
+    almacen: str | None = None
+    cantidad: float
+    fecha_vencimiento: date | None = None
+    fecha_ingreso: date | None = None
+    costo_unitario: float | None = None
+
+
 class Producto(BaseModel):
     id: str
     codigo: str | None = None
@@ -41,6 +53,8 @@ class Producto(BaseModel):
     activo: bool = True
     # Desglose opcional {almacén: cantidad} para ERPs con varios almacenes.
     stock_por_almacen: dict[str, float] | None = None
+    # Lotes con stock disponible, en orden FEFO, solo cuando el ERP los maneja.
+    lotes: list[Lote] | None = None
     # Datos propios del ERP que no tienen lugar en el modelo común
     # (p. ej. tipo o moneda en Canaan360).
     atributos: dict[str, Any] = Field(default_factory=dict)
@@ -76,15 +90,6 @@ class ProductoNuevo(BaseModel):
         return datos
 
 
-class Lote(BaseModel):
-    codigo: str
-    producto_id: str
-    almacen: str | None = None
-    cantidad: float
-    fecha_vencimiento: date | None = None
-    costo_unitario: float | None = None
-
-
 class MovimientoInventario(BaseModel):
     id: str | None = None
     producto_id: str
@@ -102,6 +107,8 @@ class MovimientoInventario(BaseModel):
     costo_unitario: float | None = Field(default=None, ge=0)
     # Documento de origen: COM-…, VEN-…, AJU-…
     documento: str | None = None
+    # Datos propios del ERP (p. ej. el tipo_movimiento original del kardex).
+    atributos: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def _completar_sentido(self) -> "MovimientoInventario":

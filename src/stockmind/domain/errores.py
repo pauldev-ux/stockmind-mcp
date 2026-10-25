@@ -73,3 +73,14 @@ class TokenInvalido(StockMindError):
 
 class ErrorAlmacenamiento(StockMindError):
     """No se pudo leer o escribir en el origen de datos (archivo abierto, BD caída…)."""
+
+
+class EscrituraNoHabilitada(StockMindError):
+    """El conector activo es de solo lectura."""
+
+    def __init__(self, conector: str):
+        super().__init__(
+            f"Escritura no habilitada para {conector}: este conector es de solo lectura. "
+            f"Registra la operación directamente en {conector}."
+        )
+        self.conector = conector

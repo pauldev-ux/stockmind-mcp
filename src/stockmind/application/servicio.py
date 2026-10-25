@@ -11,7 +11,7 @@ from typing import Any
 from stockmind.application.auditoria import Auditoria
 from stockmind.application.confirmaciones import GestorConfirmaciones, OperacionPendiente, hash_token
 from stockmind.application.validacion import esquema_producto, validar_movimiento, validar_producto
-from stockmind.domain.errores import ErrorValidacion, StockMindError, TokenInvalido
+from stockmind.domain.errores import EscrituraNoHabilitada, ErrorValidacion, StockMindError, TokenInvalido
 from stockmind.domain.modelos import (
     ErrorCampo,
     MovimientoInventario,
@@ -81,27 +81,36 @@ class InventarioService:
         campos = [c.model_dump(exclude_none=True) for c in esquema.values()]
         return {
             "conector": self.conector.nombre,
+            "admite_escritura": self.conector.admite_escritura,
             "obligatorios": [c for c in campos if c["obligatorio"]],
             "opcionales": [c for c in campos if not c["obligatorio"]],
         }
 
     # ---------------------------------------------------------- escritura
 
+    def _exigir_escritura(self) -> None:
+        if not self.conector.admite_escritura:
+            raise EscrituraNoHabilitada(self.conector.nombre_visible)
+
     def preparar_crear_producto(self, datos: dict[str, Any]) -> dict[str, Any]:
+        # Antes de validar: no tiene sentido pedirle datos al usuario ni emitir
+        # un token si el conector no puede guardar.
+        self._exigir_escritura()
         nuevo, advertencias = validar_producto(datos, self.conector)
         return self._emitir(OP_CREAR_PRODUCTO, nuevo.a_datos_planos(), nuevo.a_datos_planos(), advertencias)
 
     def preparar_movimiento(self, datos: dict[str, Any]) -> dict[str, Any]:
+        self._exigir_escritura()
         movimiento, producto, advertencias = validar_movimiento(datos, self.conector, self.hoy())
         disponible = producto.stock_en(movimiento.almacen)
         vista = {
             "producto": {"id": producto.id, "codigo": producto.codigo, "nombre": producto.nombre,
                          "unidad": producto.unidad},
-            **movimiento.model_dump(mode="json", exclude_none=True, exclude={"producto_id"}),
+            **movimiento.model_dump(mode="json", exclude_none=True, exclude={"producto_id", "atributos"}),
             "stock_actual": disponible,
             "stock_resultante": round(disponible + movimiento.delta, 4),
         }
-        datos_op = movimiento.model_dump(mode="json", exclude_none=True)
+        datos_op = movimiento.model_dump(mode="json", exclude_none=True, exclude={"atributos"})
         return self._emitir(OP_REGISTRAR_MOVIMIENTO, datos_op, vista, advertencias)
 
     def _emitir(self, tipo: str, datos_op: dict[str, Any], vista: dict[str, Any],
@@ -141,6 +150,7 @@ class InventarioService:
     def _ejecutar(self, operacion: OperacionPendiente) -> dict[str, Any]:
         # Se vuelve a validar: entre la vista previa y la confirmación otro
         # proceso pudo cambiar el stock o crear un producto con el mismo nombre.
+        self._exigir_escritura()
         if operacion.tipo == OP_CREAR_PRODUCTO:
             nuevo, _ = validar_producto(operacion.datos, self.conector)
             return self.conector.crear_producto(nuevo).model_dump(mode="json")

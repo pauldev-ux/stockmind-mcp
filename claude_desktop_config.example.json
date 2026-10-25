@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "stockmind": {
+      "command": "D:\\UAGRM\\Taller de Grado\\.venv\\Scripts\\stockmind-mcp.exe",
+      "args": []
+    }
+  }
+}

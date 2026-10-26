@@ -36,7 +36,18 @@ Reglas para escribir (crear productos o registrar movimientos):
 5. No se permite stock negativo.
 
 Antes de crear un producto, consulta campos_obligatorios_producto: cada ERP
-exige campos distintos.
+exige campos distintos. Su campo "modo_escritura" dice cómo escribe el ERP.
+
+Modo "bandeja" (ERP que no admite escritura directa):
+- Al confirmar, la operación NO se registra en el ERP: queda PENDIENTE en la
+  bandeja de salida con una referencia (SM-000012) y una guía paso a paso.
+  Díselo siempre al usuario con esas palabras; nunca digas que ya quedó guardada
+  en el ERP.
+- exportar_pendientes genera los archivos para cargarlos en el ERP.
+- verificar_pendientes busca en el ERP (solo lectura) lo ya registrado y lo
+  marca solo; las "posibles" coincidencias se las muestras al usuario para que
+  decida con marcar_registrada.
+- marcar_registrada y descartar_pendiente cambian el estado a pedido del usuario.
 """
 
 _LECTURA = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -185,6 +196,43 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     def cancelar_operacion(token: str) -> dict[str, Any]:
         """Descarta una operación preparada que el usuario no quiere guardar."""
         return servicio.cancelar(token)
+
+    # ------------------------------------------------------ bandeja de salida
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def listar_pendientes(estado: str = "pendiente", tipo: str | None = None) -> dict[str, Any]:
+        """Operaciones de la bandeja de salida. estado: pendiente | registrada | descartada | todas.
+        tipo: productos | movimientos | todos. Las pendientes traen la guía para registrarlas en el ERP."""
+        return servicio.listar_pendientes(estado, tipo)
+
+    @mcp.tool(annotations=_PREPARAR)
+    @_seguro
+    def exportar_pendientes(tipo: str = "todos") -> dict[str, Any]:
+        """Genera en exports/ los archivos para registrar las operaciones PENDIENTES en el ERP
+        (tipo: productos | movimientos | todos). No cambia su estado: siguen pendientes."""
+        return servicio.exportar_pendientes(tipo)
+
+    @mcp.tool(annotations=_PREPARAR)
+    @_seguro
+    def verificar_pendientes() -> dict[str, Any]:
+        """Busca en el ERP (solo lectura) las operaciones pendientes. Las que aparecen de forma exacta
+        se marcan como registradas; las posibles coincidencias solo se informan."""
+        return servicio.verificar_pendientes()
+
+    @mcp.tool(annotations=_CONFIRMAR)
+    @_seguro
+    def marcar_registrada(id: str, observacion: str | None = None) -> dict[str, Any]:
+        """Marca una operación pendiente (p. ej. SM-000012) como ya registrada en el ERP.
+        Usar solo cuando el usuario lo indique."""
+        return servicio.marcar_registrada(id, observacion)
+
+    @mcp.tool(annotations=_CONFIRMAR)
+    @_seguro
+    def descartar_pendiente(id: str, motivo: str | None = None) -> dict[str, Any]:
+        """Descarta una operación pendiente (p. ej. SM-000012): no se registrará en el ERP.
+        El motivo es obligatorio. Usar solo cuando el usuario lo indique."""
+        return servicio.descartar_pendiente(id, motivo)
 
     return mcp
 

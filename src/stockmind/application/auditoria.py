@@ -9,7 +9,8 @@ from stockmind.application.confirmaciones import Reloj, ahora_utc
 
 
 class Auditoria:
-    """Eventos: preparada, confirmada, rechazada, cancelada.
+    """Eventos de confirmación: preparada, confirmada, rechazada, cancelada.
+    Eventos de la bandeja de salida: encolada, exportada, registrada, descartada.
 
     Del token solo se guarda un prefijo de su hash: alcanza para seguir una
     operación de punta a punta sin poder reutilizarlo.
@@ -31,6 +32,7 @@ class Auditoria:
         resultado: dict[str, Any] | None = None,
         error: str | None = None,
         token_hash: str | None = None,
+        referencia: str | None = None,
     ) -> dict[str, Any]:
         registro = {
             "ts": self.reloj().isoformat(timespec="seconds"),
@@ -39,6 +41,7 @@ class Auditoria:
             "conector": conector,
             "origen": origen,
             "token": token_hash[:12] if token_hash else None,
+            "referencia": referencia,
             "datos": datos,
             "resultado": resultado,
             "error": error,

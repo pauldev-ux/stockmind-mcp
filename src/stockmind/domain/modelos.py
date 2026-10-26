@@ -14,6 +14,8 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from stockmind.domain.texto import normalizar
+
 
 class TipoMovimiento(StrEnum):
     ENTRADA = "entrada"
@@ -24,6 +26,20 @@ class TipoMovimiento(StrEnum):
 class Sentido(StrEnum):
     POSITIVO = "+"
     NEGATIVO = "-"
+
+
+class ModoEscritura(StrEnum):
+    """Cómo escribe un conector.
+
+    DIRECTA: al confirmar se escribe en el ERP (p. ej. CSV/Excel).
+    BANDEJA: al confirmar, la operación queda PENDIENTE en una bandeja de salida
+             local para registrarla después en el ERP (ERP de solo lectura).
+    NINGUNA: el conector no acepta escrituras.
+    """
+
+    DIRECTA = "directa"
+    BANDEJA = "bandeja"
+    NINGUNA = "ninguna"
 
 
 class Lote(BaseModel):
@@ -64,8 +80,10 @@ class Producto(BaseModel):
         return self.stock_actual < self.stock_minimo
 
     def stock_en(self, almacen: str | None) -> float:
+        """Stock en un almacén (sin distinguir mayúsculas ni tildes) o el total si no se indica."""
         if almacen and self.stock_por_almacen is not None:
-            return self.stock_por_almacen.get(almacen, 0.0)
+            clave = normalizar(almacen)
+            return sum(v for k, v in self.stock_por_almacen.items() if normalizar(k) == clave)
         return self.stock_actual
 
 
@@ -171,3 +189,14 @@ class CampoRequerido(BaseModel):
 class ErrorCampo(BaseModel):
     campo: str
     mensaje: str
+
+
+class Revision(BaseModel):
+    """Resultado de las reglas propias de un ERP sobre una operación."""
+
+    faltantes: list[CampoRequerido] = Field(default_factory=list)
+    errores: list[ErrorCampo] = Field(default_factory=list)
+    advertencias: list[str] = Field(default_factory=list)
+    # Datos que el ERP necesita para registrar la operación (p. ej. el reparto
+    # por lotes). Se muestran en la vista previa y se guardan en la bandeja.
+    detalle: dict[str, Any] = Field(default_factory=dict)

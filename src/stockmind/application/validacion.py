@@ -10,6 +10,7 @@ Los campos desconocidos se rechazan en lugar de descartarse en silencio.
 """
 
 import math
+from collections.abc import Callable
 from datetime import date, datetime
 from typing import Any
 
@@ -210,12 +211,23 @@ def validar_producto(datos: dict[str, Any], conector: InventarioConnector) -> tu
 # --------------------------------------------------------------- movimiento
 
 def validar_movimiento(
-    datos: dict[str, Any], conector: InventarioConnector, hoy: date
+    datos: dict[str, Any], conector: InventarioConnector, hoy: date,
+    comprometido: Callable[[Producto, str | None], float] | None = None,
 ) -> tuple[MovimientoInventario, Producto, list[str]]:
     """Devuelve el movimiento listo para registrar, el producto y las advertencias.
 
-    Rechaza movimientos que dejarían el stock negativo.
+    Rechaza movimientos que dejarían el stock negativo. `comprometido(producto,
+    almacén)` da el stock ya reservado por salidas pendientes en la bandeja.
     """
+    movimiento, producto = construir_movimiento(datos, conector, hoy)
+    advertencias = revisar_stock(movimiento, producto, movimiento.almacen, comprometido)
+    return movimiento, producto, advertencias
+
+
+def construir_movimiento(
+    datos: dict[str, Any], conector: InventarioConnector, hoy: date
+) -> tuple[MovimientoInventario, Producto]:
+    """Primera parte: campos, tipos, fechas y producto. Todavía no mira el stock."""
     if not isinstance(datos, dict):
         raise ErrorValidacion(invalidos=[ErrorCampo(campo="datos", mensaje="debe ser un objeto con los campos")])
     datos = {k: (_ALIAS_SENTIDO.get(_clave(v), v) if _clave(k) == "sentido" and isinstance(v, str) else v)
@@ -260,15 +272,26 @@ def validar_movimiento(
         producto_id=producto.id,
         fecha=valores.get("fecha", hoy),
     )
+    return movimiento, producto
 
-    disponible = producto.stock_en(movimiento.almacen)
+
+def revisar_stock(
+    movimiento: MovimientoInventario, producto: Producto, almacen: str | None,
+    comprometido: Callable[[Producto, str | None], float] | None = None,
+) -> list[str]:
+    """Segunda parte: no permite stock negativo (descontando lo comprometido) y avisa si queda
+    bajo el mínimo. `almacen` puede ser el que eligió el ERP cuando el usuario no indicó uno."""
+    reservado = comprometido(producto, almacen) if comprometido and movimiento.delta < 0 else 0.0
+    disponible = producto.stock_en(almacen) - reservado
     resultante = disponible + movimiento.delta
     if resultante < -_EPS:
         unidad = f" {producto.unidad}" if producto.unidad else ""
+        detalle = (f" ({reservado:g} ya comprometidas en operaciones pendientes de la bandeja)"
+                   if reservado > _EPS else "")
         raise ErrorValidacion(invalidos=[ErrorCampo(
             campo="cantidad",
-            mensaje=f"stock insuficiente de '{producto.nombre}': hay {disponible:g}{unidad} y se piden "
-                    f"{movimiento.cantidad:g}. No se permite stock negativo",
+            mensaje=f"stock insuficiente de '{producto.nombre}': hay {disponible:g}{unidad} disponibles"
+                    f"{detalle} y se piden {movimiento.cantidad:g}. No se permite stock negativo",
         )])
 
     advertencias = []
@@ -276,4 +299,4 @@ def validar_movimiento(
         advertencias.append(
             f"El stock quedará en {resultante:g}, por debajo del mínimo ({producto.stock_minimo:g})."
         )
-    return movimiento, producto, advertencias
+    return advertencias

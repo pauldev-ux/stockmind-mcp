@@ -59,10 +59,24 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 - `adapters/`: solo E/S y traducción al modelo común. **No** validan entradas
   de usuario ni emiten tokens, pero **sí** rechazan el stock negativo como
   segunda barrera (`StockInsuficiente`).
-- **Conectores de solo lectura.** El puerto tiene `admite_escritura` (por
-  defecto `True`). Si es `False`, el servicio lanza `EscrituraNoHabilitada`
-  **antes** de validar o emitir un token, y también al confirmar.
-  `nombre_visible` es el nombre que se muestra en los mensajes.
+- **Modo de escritura** (`modo_escritura`, `ModoEscritura`):
+  - `DIRECTA` (CSV): al confirmar se escribe en el ERP.
+  - `BANDEJA`: al confirmar, la operación queda **pendiente** en la bandeja de
+    salida (ver más abajo). Nunca se llama a `crear_producto` o
+    `registrar_movimiento` del conector.
+  - `NINGUNA`: `EscrituraNoHabilitada` **antes** de validar o emitir un token.
+  - `nombre_visible` es el nombre que se muestra en los mensajes.
+- **Ganchos opcionales del puerto:**
+  - `validar_producto_nuevo` (errores) y `advertencias_producto_nuevo`.
+  - `validar_movimiento_nuevo(mov, producto, pendientes) → Revision`, que
+    devuelve faltantes, errores, advertencias y `detalle`. El `detalle` (p. ej.
+    almacén o reparto por lotes) se muestra en la vista previa y se guarda en la
+    bandeja.
+  - **Orden de la validación de movimientos:**
+    1. `construir_movimiento`;
+    2. las reglas del ERP;
+    3. `revisar_stock`, con el almacén que eligió el ERP si el usuario no
+       indicó uno.
 - `application/servicio.py`: lo usan el servidor MCP y, más adelante, un
   backend **FastAPI** en otro proceso con `construir_servicio(origen="web")`.
   No metas lógica de negocio en `mcp_server/`.
@@ -131,7 +145,8 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 4. **No se permite stock negativo**: lo revisa la validación y también el
    adaptador.
 5. **Auditoría.** Cada operación se registra en `logs/auditoria.jsonl`.
-   - Eventos: `preparada`, `confirmada`, `rechazada` y `cancelada`.
+   - Eventos: `preparada`, `confirmada`, `rechazada` y `cancelada`; en la
+     bandeja, `encolada`, `exportada`, `registrada` y `descartada`.
    - Campos: `origen`, `conector` y un prefijo de 12 caracteres del hash del token.
 6. **Las tools MCP no lanzan errores de negocio.** Devuelven
    `{"ok": false, "error", "mensaje", ...}`; de eso se encarga el decorador
@@ -140,6 +155,42 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
    en el servidor**.
 8. **`.env`:** con `env_ignore_empty=True`, una variable vacía cuenta como no
    definida y no rompe el arranque.
+
+## Bandeja de salida (modo BANDEJA)
+
+- **Almacenamiento:** `application/bandeja.py` (`BandejaStore`).
+  - `SqliteBandejaStore` usa la misma `data/stockmind.db`, tabla
+    `bandeja_operaciones`, compartida entre procesos.
+  - `MemoriaBandejaStore` se usa en los tests.
+- **Modelo:** `domain/bandeja.py`.
+  - `OperacionBandeja` guarda los datos confirmados, la vista previa,
+    `detalle_erp`, la guía, el estado, las fechas, la observación,
+    `registrada_por` (`manual`/`conciliacion`), `id_externo`, `exportada_en` y
+    `archivo`.
+  - La referencia es `SM-000012`, y `parsear_referencia` acepta `SM-12` o `12`.
+- **Estados:** `pendiente` → `registrada` | `descartada`.
+  - La transición es atómica (`UPDATE … WHERE estado='pendiente' RETURNING`).
+    Cualquier otra lanza `TransicionInvalida`.
+  - Descartar exige un motivo.
+- **Validación en modo bandeja:**
+  - No se permiten dos productos pendientes con el mismo nombre.
+  - **El stock comprometido** (salidas pendientes del mismo producto y almacén)
+    se descuenta al validar. Al confirmar se revalida todo.
+- **Integración:** `ports/bandeja.py::IntegracionBandeja` (`guia`, `exportar`,
+  `verificar`).
+  - El conector la implementa si quiere el formato del ERP y la conciliación.
+  - Si no, se usa `IntegracionGenerica`: un Excel simple, una guía genérica y
+    sin conciliación.
+  - `verificar` es **solo lectura**. Una coincidencia exacta marca la operación
+    como `registrada` (`registrada_por="conciliacion"`); las posibles **solo se
+    informan**.
+- **Exportar:** escribe en `exports/` (`EXPORTS_DIR`, ignorada por git) y no
+  cambia el estado. Solo exporta las operaciones del conector activo.
+- **Respuestas:** siempre dejan claro que la operación quedó **PENDIENTE** en el
+  ERP (`estado: "pendiente_en_erp"`). Las instrucciones del servidor MCP se lo
+  piden a la IA.
+- **Auditoría:** `encolada`, `exportada`, `registrada` y `descartada`, con el
+  campo `referencia`.
 
 ## Conector CSV/Excel
 
@@ -172,11 +223,6 @@ para predecir.
 
 ## Próximos pasos previstos
 
-- **Escrituras en conectores de solo lectura:**
-  - La operación confirmada va a una **bandeja de salida** local (`exports/`,
-    ignorada).
-  - Se exporta al formato de importación del ERP.
-  - Cada operación pendiente lleva una **guía paso a paso** para registrarla.
 - **Backend FastAPI** con chat propio, que reutilice `construir_servicio(origen="web")`.
 - **Predicción de demanda y punto de reorden**, a partir de `ventas_por_producto`
   y del kardex.

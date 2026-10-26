@@ -17,6 +17,7 @@ from datetime import timedelta
 
 from stockmind.adapters.csv_excel import CsvExcelConnector
 from stockmind.application.auditoria import Auditoria
+from stockmind.application.bandeja import SqliteBandejaStore
 from stockmind.application.confirmaciones import GestorConfirmaciones, SqliteConfirmacionStore
 from stockmind.application.servicio import InventarioService
 from stockmind.config.settings import Settings, get_settings
@@ -68,5 +69,8 @@ def construir_servicio(settings: Settings | None = None, *, origen: str = "mcp")
             ttl=timedelta(minutes=settings.token_ttl_minutos),
         ),
         auditoria=Auditoria(settings.auditoria_log),
+        # Misma base local que los tokens: así el servidor MCP y el backend web la comparten.
+        bandeja=SqliteBandejaStore(settings.confirmaciones_db),
+        exports_dir=settings.exports_dir,
         origen=origen,
     )

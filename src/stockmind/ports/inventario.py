@@ -8,13 +8,16 @@ auditoría viven en `application/` y no se repiten en cada adaptador.
 from abc import ABC, abstractmethod
 from datetime import date
 
+from stockmind.domain.bandeja import OperacionBandeja
 from stockmind.domain.modelos import (
     CampoRequerido,
     ErrorCampo,
+    ModoEscritura,
     MovimientoInventario,
     Producto,
     ProductoNuevo,
     ResumenVentasProducto,
+    Revision,
 )
 
 
@@ -23,9 +26,9 @@ class InventarioConnector(ABC):
     nombre: str = "desconocido"
     #: Nombre para mostrar en los mensajes al usuario.
     nombre_visible: str = "el ERP"
-    #: False en conectores de solo lectura: el servicio rechaza las escrituras
-    #: antes de validar o emitir un token.
-    admite_escritura: bool = True
+    #: DIRECTA escribe en el ERP al confirmar; BANDEJA deja la operación pendiente
+    #: en la bandeja de salida; NINGUNA rechaza las escrituras antes de validar.
+    modo_escritura: ModoEscritura = ModoEscritura.DIRECTA
 
     @abstractmethod
     def buscar_productos(self, texto: str, limite: int = 20) -> list[Producto]:
@@ -76,3 +79,17 @@ class InventarioConnector(ABC):
         Opcional: por defecto no agrega errores.
         """
         return []
+
+    def advertencias_producto_nuevo(self, datos: ProductoNuevo) -> list[str]:
+        """Avisos que no bloquean (p. ej. cómo guardará el ERP el nombre). Opcional."""
+        return []
+
+    def validar_movimiento_nuevo(
+        self, movimiento: MovimientoInventario, producto: Producto, pendientes: list[OperacionBandeja]
+    ) -> Revision:
+        """Reglas propias del ERP para un movimiento (almacén, lote…). Opcional.
+
+        `pendientes` son los movimientos del mismo producto que siguen en la
+        bandeja: su stock ya está comprometido aunque el ERP todavía no lo sepa.
+        """
+        return Revision()

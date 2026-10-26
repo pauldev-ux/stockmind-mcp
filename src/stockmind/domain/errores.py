@@ -84,3 +84,16 @@ class EscrituraNoHabilitada(StockMindError):
             f"Registra la operación directamente en {conector}."
         )
         self.conector = conector
+
+
+class OperacionNoEncontrada(StockMindError):
+    def __init__(self, referencia: str):
+        super().__init__(f"No existe la operación {referencia} en la bandeja.")
+
+
+class TransicionInvalida(StockMindError):
+    """Solo una operación pendiente puede pasar a registrada o descartada."""
+
+
+class BandejaNoDisponible(StockMindError):
+    """El conector activo no usa la bandeja de salida."""

@@ -26,6 +26,8 @@ async def test_expone_las_tools_del_puerto(servicio):
         "buscar_productos", "obtener_producto", "listar_bajo_stock", "listar_movimientos",
         "ventas_por_producto", "campos_obligatorios_producto", "crear_producto", "registrar_movimiento",
         "confirmar_operacion", "cancelar_operacion",
+        "listar_pendientes", "exportar_pendientes", "verificar_pendientes", "marcar_registrada",
+        "descartar_pendiente",
     }
 
 

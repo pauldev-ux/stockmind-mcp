@@ -76,7 +76,8 @@ Cubren:
 - la validación y el flujo de confirmación (memoria y SQLite);
 - las tools MCP de punta a punta;
 - la coherencia del generador;
-- la carga de conectores opcionales.
+- la carga de conectores opcionales;
+- la bandeja de salida con conectores falsos (estados, stock comprometido, exportar, verificar).
 
 Los tests públicos no necesitan ningún conector privado.
 
@@ -97,22 +98,60 @@ StockMind se probó también con un **conector para un ERP real (privado)**, de
 Si el módulo no está instalado, StockMind lo dice con un mensaje claro y no
 arranca con ese conector.
 
-**Reglas de un conector de solo lectura:**
+**Modo de escritura** (`modo_escritura` del conector):
 
-- Declara `admite_escritura = False`. El servicio rechaza `crear_producto` y
-  `registrar_movimiento` con "Escritura no habilitada" **antes** de validar
-  o emitir un token.
-- Contra la base de datos del ERP solo se ejecutan consultas. Las barreras son
-  tres: un usuario con solo SELECT, la sesión en modo `READ ONLY` y una
-  guardia en el código que rechaza cualquier sentencia que no sea una consulta.
+| Modo | Al confirmar |
+|---|---|
+| `directa` | Se escribe en el ERP (p. ej. CSV/Excel). |
+| `bandeja` | **No** se escribe en el ERP: la operación queda **pendiente** en la bandeja de salida local, para registrarla después en el ERP. |
+| `ninguna` | Se rechaza con "Escritura no habilitada", antes de validar o emitir un token. |
+
+**Reglas de un conector de solo lectura:** contra la base de datos del ERP
+solo se ejecutan consultas.
+
+- Las barreras son tres: un usuario con solo SELECT, la sesión en modo
+  `READ ONLY` y una guardia en el código que rechaza cualquier sentencia que no
+  sea una consulta.
 - Todo el SQL va parametrizado.
 
-**Escrituras en un ERP de solo lectura (próxima fase):**
+## Bandeja de salida (ERP de solo lectura)
 
-- La operación confirmada queda en una **bandeja de salida** local.
-- Se exporta al formato de importación que el ERP ya tenga.
-- Cada operación pendiente lleva una **guía paso a paso** para registrarla en
-  el ERP.
+Con un conector en modo `bandeja`, el flujo de vista previa, token y
+confirmación es el mismo. La diferencia está en lo que pasa al confirmar:
+
+1. Se revalida con las reglas del ERP: campos, valores válidos, nombre único,
+   almacén y lote, y que una salida no deje el stock negativo.
+2. La operación se guarda **pendiente** en `data/stockmind.db` (tabla
+   `bandeja_operaciones`), con una referencia (`SM-000012`) y una **guía paso
+   a paso** para registrarla en el ERP.
+3. La respuesta lo dice con claridad: **"NO se registró todavía en el ERP: quedó
+   PENDIENTE"**.
+
+**Estados:** `pendiente` → `registrada` o `descartada`.
+
+- El cambio es único, atómico y deja fecha y observación.
+- Descartar exige un motivo.
+- Cada cambio queda en la auditoría (`encolada`, `exportada`, `registrada`,
+  `descartada`).
+
+**Stock comprometido:** las salidas pendientes se descuentan al validar nuevas
+salidas, aunque el ERP todavía no las conozca.
+
+**Tools:**
+
+| Tool | Qué hace |
+|---|---|
+| `listar_pendientes(estado, tipo)` | Lista la bandeja: `pendiente` / `registrada` / `descartada` / `todas`; `productos` / `movimientos`. Las pendientes traen su guía |
+| `exportar_pendientes(tipo)` | Genera en `exports/` los archivos para registrar en el ERP. No cambia el estado |
+| `verificar_pendientes()` | Busca en el ERP (solo lectura). Lo encontrado de forma exacta se marca como registrado; las posibles coincidencias solo se informan |
+| `marcar_registrada(id, observacion)` | Marca a mano una pendiente como registrada |
+| `descartar_pendiente(id, motivo)` | Descarta una pendiente; no se registrará |
+
+**Integración con el ERP:** un conector en modo bandeja puede implementar
+`ports/bandeja.py::IntegracionBandeja` (`guia`, `exportar`, `verificar`)
+para usar el formato de importación del ERP y conciliar. Si no la implementa,
+se usa una integración genérica: un Excel con los datos, una guía genérica y
+sin conciliación automática.
 
 ## Probar con MCP Inspector
 
@@ -178,9 +217,10 @@ Si no aparece, revisa `%APPDATA%\Claude\logs\mcp-server-stockmind.log`.
 | `CONNECTOR` | `csv` | Conector activo: `csv` o un conector opcional instalado |
 | `DATA_DIR` | `data` | Carpeta de los archivos del conector CSV |
 | `FORMATO_DATOS` | `csv` | `csv` o `xlsx` |
-| `CONFIRMACIONES_DB` | `data/stockmind.db` | SQLite de tokens, compartido entre procesos |
+| `CONFIRMACIONES_DB` | `data/stockmind.db` | SQLite local: tokens y bandeja de salida, compartido entre procesos |
 | `TOKEN_TTL_MINUTOS` | `10` | Vigencia del token |
 | `AUDITORIA_LOG` | `logs/auditoria.jsonl` | Log de auditoría |
+| `EXPORTS_DIR` | `exports` | Archivos de `exportar_pendientes` (ignorada por git) |
 | `LOG_LEVEL` | `INFO` | Los logs van a stderr |
 
 Las rutas relativas se resuelven desde la raíz del proyecto. Una variable vacía cuenta como no definida. Los conectores opcionales documentan sus propias variables.
@@ -199,15 +239,16 @@ Las rutas relativas se resuelven desde la raíz del proyecto. Una variable vací
 | `registrar_movimiento(...)` | prepara | Vista previa + token; **no guarda** |
 | `confirmar_operacion(token)` | escribe | Ejecuta la operación preparada |
 | `cancelar_operacion(token)` | — | Descarta la operación preparada |
+| `listar_pendientes`, `exportar_pendientes`, `verificar_pendientes`, `marcar_registrada`, `descartar_pendiente` | bandeja | Ver "Bandeja de salida" |
 
 ## Estructura
 
 ```
 src/stockmind/
   domain/        modelo común (Pydantic) y errores
-  ports/         InventarioConnector (interfaz abstracta)
+  ports/         InventarioConnector e IntegracionBandeja (interfaces abstractas)
   adapters/      CsvExcelConnector (los conectores opcionales van en subpaquetes)
-  application/   validación, confirmaciones (ConfirmacionStore), auditoría, servicio
+  application/   validación, confirmaciones (ConfirmacionStore), bandeja (BandejaStore), auditoría, servicio
   mcp_server/    servidor MCP (MCPServer del SDK oficial)
   config/        settings (pydantic-settings)
   composicion.py arma el servicio con el conector de .env

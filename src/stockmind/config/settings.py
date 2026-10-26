@@ -32,9 +32,12 @@ class Settings(BaseSettings):
 
     auditoria_log: Path = Path("logs/auditoria.jsonl")
 
+    # Archivos que genera exportar_pendientes (bandeja de salida)
+    exports_dir: Path = Path("exports")
+
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 
-    @field_validator("data_dir", "confirmaciones_db", "auditoria_log")
+    @field_validator("data_dir", "confirmaciones_db", "auditoria_log", "exports_dir")
     @classmethod
     def _resolver_desde_raiz(cls, ruta: Path) -> Path:
         return ruta if ruta.is_absolute() else (PROJECT_ROOT / ruta).resolve()

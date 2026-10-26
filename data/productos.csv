@@ -1,0 +1,41 @@
+﻿id,codigo,nombre,categoria,unidad,precio_venta,costo,stock_actual,stock_minimo,proveedor,almacen,activo
+P0001,CON-001,Cemento IP-30 bolsa 50 kg,Construcción,bolsa,63.6,54.6,332,168,Distribuidora Andina S.R.L.,Principal,1
+P0002,CON-002,Fierro corrugado 8 mm x 12 m,Construcción,barra,48.76,39.9,233,196,Importadora El Constructor,Principal,1
+P0003,CON-003,Fierro corrugado 10 mm x 12 m,Construcción,barra,73.14,60.9,225,112,Importadora El Constructor,Principal,1
+P0004,CON-004,Fierro corrugado 12 mm x 12 m,Construcción,barra,104.94,88.2,0,63,Importadora El Constructor,Principal,1
+P0005,CON-005,Alambre de amarre N° 16,Construcción,kg,18.02,13.65,106,98,Importadora El Constructor,Principal,1
+P0006,CON-006,Clavos de 2 1/2 pulgadas,Construcción,kg,20.14,14.7,182,56,Comercial Oriente Ltda.,Principal,1
+P0007,CON-007,Yeso bolsa 25 kg,Construcción,bolsa,29.68,23.1,0,42,Distribuidora Andina S.R.L.,Principal,1
+P0008,CON-008,Cal hidratada bolsa 25 kg,Construcción,bolsa,33.92,26.25,89,28,Distribuidora Andina S.R.L.,Principal,1
+P0009,PLO-001,"Tubo PVC presión 1/2"" x 6 m",Plomería,pieza,24,18,93,63,Comercial Oriente Ltda.,Principal,1
+P0010,PLO-002,"Tubo PVC presión 3/4"" x 6 m",Plomería,pieza,31,24,89,42,Comercial Oriente Ltda.,Principal,1
+P0011,PLO-003,"Tubo PVC sanitario 4"" x 3 m",Plomería,pieza,58,45,120,35,Comercial Oriente Ltda.,Principal,1
+P0012,PLO-004,"Codo PVC 1/2"" x 90°",Plomería,unidad,2.5,1.5,303,154,Comercial Oriente Ltda.,Principal,1
+P0013,PLO-005,"Llave de paso 1/2""",Plomería,unidad,39,28,13,21,Comercial Oriente Ltda.,Principal,1
+P0014,PLO-006,Pegamento para PVC 240 ml,Plomería,unidad,24,17,29,28,Comercial Oriente Ltda.,Principal,1
+P0015,PLO-007,"Cinta teflón 3/4""",Plomería,unidad,3.5,2,130,126,Comercial Oriente Ltda.,Principal,1
+P0016,PLO-008,Grifo para lavamanos cromado,Plomería,unidad,89,65,33,9,Importadora El Constructor,Principal,1
+P0017,ELE-001,Cable THW 12 AWG rollo 100 m,Electricidad,rollo,520,420,0,6,Importadora El Constructor,Principal,1
+P0018,ELE-002,Cable 14 AWG por metro,Electricidad,metro,4.5,3.2,598,266,Importadora El Constructor,Principal,1
+P0019,ELE-003,Interruptor simple,Electricidad,unidad,14,9,43,42,Importadora El Constructor,Principal,1
+P0020,ELE-004,Tomacorriente doble,Electricidad,unidad,16,11,107,42,Importadora El Constructor,Principal,1
+P0021,ELE-005,Foco LED 9 W,Electricidad,unidad,15,9,133,84,Importadora El Constructor,Principal,1
+P0022,ELE-006,Cinta aislante 20 m,Electricidad,unidad,7,4,186,70,Importadora El Constructor,Principal,1
+P0023,ELE-007,Breaker termomagnético 20 A,Electricidad,unidad,52,38,39,11,Importadora El Constructor,Principal,1
+P0024,PIN-001,Pintura látex blanca 4 L,Pinturas,galón,125,95,62,28,Distribuidora Andina S.R.L.,Principal,1
+P0025,PIN-002,Pintura látex blanca balde 18 L,Pinturas,balde,480,380,14,7,Distribuidora Andina S.R.L.,Principal,1
+P0026,PIN-003,Esmalte sintético 1 L,Pinturas,litro,60,45,0,18,Distribuidora Andina S.R.L.,Principal,1
+P0027,PIN-004,Rodillo de 9 pulgadas,Pinturas,unidad,26,18,53,21,Distribuidora Andina S.R.L.,Principal,1
+P0028,PIN-005,Brocha de 3 pulgadas,Pinturas,unidad,15,10,42,28,Distribuidora Andina S.R.L.,Principal,1
+P0029,PIN-006,Thinner 1 L,Pinturas,litro,21,15,60,28,Distribuidora Andina S.R.L.,Principal,1
+P0030,IMP-001,Impermeabilizante acrílico 4 L,Impermeabilizantes,galón,185,140,10,11,Distribuidora Andina S.R.L.,Principal,1
+P0031,IMP-002,Membrana asfáltica rollo 10 m²,Impermeabilizantes,rollo,330,260,16,5,Distribuidora Andina S.R.L.,Principal,1
+P0032,IMP-003,Canaleta PVC 4 m,Impermeabilizantes,pieza,72,55,41,14,Comercial Oriente Ltda.,Principal,1
+P0033,IMP-004,Silicona transparente 280 ml,Impermeabilizantes,unidad,26,18,0,35,Comercial Oriente Ltda.,Principal,1
+P0034,IMP-005,Plástico negro 4 m de ancho,Impermeabilizantes,metro,9,6,0,98,Comercial Oriente Ltda.,Principal,1
+P0035,HER-001,Martillo de uña 16 oz,Herramientas,unidad,65,45,26,9,Importadora El Constructor,Principal,1
+P0036,HER-002,Pala punta redonda,Herramientas,unidad,75,55,19,11,Importadora El Constructor,Principal,1
+P0037,HER-003,Carretilla 90 L,Herramientas,unidad,490,380,4,2,Importadora El Constructor,Principal,1
+P0038,HER-004,Flexómetro 5 m,Herramientas,unidad,32,22,41,14,Importadora El Constructor,Principal,1
+P0039,HER-005,"Disco de corte 4 1/2""",Herramientas,unidad,12,8,121,56,Importadora El Constructor,Principal,1
+P0040,FIJ-001,Tornillo autorroscante caja x 100,Fijaciones,caja,26,18,30,21,Comercial Oriente Ltda.,Principal,1

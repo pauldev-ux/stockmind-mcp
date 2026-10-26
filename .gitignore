@@ -1,4 +1,4 @@
-# Entorno
+# Entorno y secretos
 .venv/
 venv/
 .env
@@ -11,14 +11,28 @@ __pycache__/
 build/
 dist/
 
-# Datos generados y estado local
-data/*
-!data/.gitkeep
-logs/*
-!logs/.gitkeep
+# Conectores privados (ERP real): quedan solo en la PC del autor.
+# Convención: cada conector privado es un subpaquete de adapters/ y sus tests van en tests/privados/.
+src/stockmind/adapters/*/
+tests/privados/
+scripts/sql/
+docs/
+
+# Estado local y generados
+logs/
+exports/
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/.stockmind.lock
+data/.*.tmp.*
 
 # Excel abierto (archivos de bloqueo)
 ~$*
+
+# Configuración local de Claude Code
+.claude/settings.local.json
+CLAUDE.local.md
 
 # Editores / SO
 .vscode/

@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import SecretStr, field_validator
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # src/stockmind/config/settings.py -> raíz del proyecto.
@@ -18,6 +18,8 @@ class Settings(BaseSettings):
         env_file=PROJECT_ROOT / ".env",
         env_file_encoding="utf-8",
         extra="ignore",
+        # Una variable vacía ("X=") cuenta como no definida, en vez de fallar al convertir.
+        env_ignore_empty=True,
     )
 
     connector: str = "csv"
@@ -31,23 +33,6 @@ class Settings(BaseSettings):
     auditoria_log: Path = Path("logs/auditoria.jsonl")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
-
-    # Conector Canaan360 (MySQL, solo lectura)
-    canaan_db_host: str = "127.0.0.1"
-    canaan_db_port: int = 3306
-    canaan_db_name: str = "canaan_360"
-    canaan_db_user: str | None = None
-    canaan_db_password: SecretStr = SecretStr("")
-    # Canaan360 es multiempresa: toda consulta filtra por esta empresa.
-    canaan_empresa_id: int | None = None
-    # true: no arranca si el usuario MySQL tiene privilegios de escritura; false: solo avisa.
-    canaan_estricto: bool = False
-    # Incluir en ventas_por_producto las ventas cargadas como históricas (es_historico = 1).
-    canaan_incluir_historicas: bool = True
-
-    @property
-    def canaan_configurado(self) -> bool:
-        return bool(self.canaan_db_user and self.canaan_empresa_id)
 
     @field_validator("data_dir", "confirmaciones_db", "auditoria_log")
     @classmethod

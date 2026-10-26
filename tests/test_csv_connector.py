@@ -49,7 +49,7 @@ def test_obtener_inexistente(conector):
 
 
 def test_codigo_repetido_es_ambiguo(datos_dir, formato):
-    # En Canaan360 el código no es único; el conector no debe elegir uno al azar.
+    # En algunos ERP el código no es único; el conector no debe elegir uno al azar.
     ruta = ruta_tabla(datos_dir, "productos", formato)
     df = leer_tabla(ruta, "productos")
     extra = df.iloc[[0]].assign(id="P0004", nombre="Cemento otra marca")

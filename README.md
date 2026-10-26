@@ -9,8 +9,8 @@ stock, kardex y ventas, y puede crear productos o registrar movimientos, pero
 
 ```
 IA ──MCP──► mcp_server ──► application (validación · confirmación · auditoría) ──► puerto ──► adaptador ──► ERP
-                                                                                 InventarioConnector   CSV/Excel hoy
-                                                                                                        Canaan360 después
+                                                                                 InventarioConnector   CSV/Excel (lectura y escritura)
+                                                                                                        Conector para un ERP real (privado)
 ```
 
 ## Requisitos
@@ -66,12 +66,53 @@ el proveedor se demoró.
 ## Tests
 
 ```powershell
-python -m pytest
+python -m pytest                      # todo; los de integración se saltan si no hay un ERP configurado
+python -m pytest -m "not integracion"
 ```
 
-Cubren el conector CSV/Excel en ambos formatos, la validación, el flujo de
-confirmación (memoria y SQLite), las tools MCP de punta a punta y la
-coherencia del generador.
+Cubren:
+
+- el conector CSV/Excel en ambos formatos;
+- la validación y el flujo de confirmación (memoria y SQLite);
+- las tools MCP de punta a punta;
+- la coherencia del generador;
+- la carga de conectores opcionales.
+
+Los tests públicos no necesitan ningún conector privado.
+
+## Conectores opcionales (ERP real, privado)
+
+StockMind se probó también con un **conector para un ERP real (privado)**, de
+**solo lectura**. Ese conector no se publica en este repositorio.
+
+**Cómo se agrega uno:**
+
+1. Crea un subpaquete `src/stockmind/adapters/<nombre>/` que implemente
+   `InventarioConnector` y exponga `crear_conector(settings)`.
+2. Su configuración la lee el propio conector, desde el mismo `.env` y con
+   su propio prefijo de variables.
+3. Pon `CONNECTOR=<nombre>` en `.env`.
+4. Si el conector usa MySQL, instala los extras: `pip install -e ".[mysql]"`.
+
+Si el módulo no está instalado, StockMind lo dice con un mensaje claro y no
+arranca con ese conector.
+
+**Reglas de un conector de solo lectura:**
+
+- Declara `admite_escritura = False`. El servicio rechaza `crear_producto` y
+  `registrar_movimiento` con "Escritura no habilitada" **antes** de validar
+  o emitir un token.
+- Contra la base de datos del ERP solo se ejecutan consultas. Las barreras son
+  tres: un usuario con solo SELECT, la sesión en modo `READ ONLY` y una
+  guardia en el código que rechaza cualquier sentencia que no sea una consulta.
+- Todo el SQL va parametrizado.
+
+**Escrituras en un ERP de solo lectura (próxima fase):**
+
+- La operación confirmada queda en una **bandeja de salida** local.
+- Se exporta al formato de importación que el ERP ya tenga.
+- Cada operación pendiente lleva una **guía paso a paso** para registrarla en
+  el ERP.
 
 ## Probar con MCP Inspector
 
@@ -134,7 +175,7 @@ Si no aparece, revisa `%APPDATA%\Claude\logs\mcp-server-stockmind.log`.
 
 | Variable | Por defecto | Uso |
 |---|---|---|
-| `CONNECTOR` | `csv` | Conector activo |
+| `CONNECTOR` | `csv` | Conector activo: `csv` o un conector opcional instalado |
 | `DATA_DIR` | `data` | Carpeta de los archivos del conector CSV |
 | `FORMATO_DATOS` | `csv` | `csv` o `xlsx` |
 | `CONFIRMACIONES_DB` | `data/stockmind.db` | SQLite de tokens, compartido entre procesos |
@@ -142,7 +183,7 @@ Si no aparece, revisa `%APPDATA%\Claude\logs\mcp-server-stockmind.log`.
 | `AUDITORIA_LOG` | `logs/auditoria.jsonl` | Log de auditoría |
 | `LOG_LEVEL` | `INFO` | Los logs van a stderr |
 
-Las rutas relativas se resuelven desde la raíz del proyecto.
+Las rutas relativas se resuelven desde la raíz del proyecto. Una variable vacía cuenta como no definida. Los conectores opcionales documentan sus propias variables.
 
 ## Tools MCP
 
@@ -165,14 +206,14 @@ Las rutas relativas se resuelven desde la raíz del proyecto.
 src/stockmind/
   domain/        modelo común (Pydantic) y errores
   ports/         InventarioConnector (interfaz abstracta)
-  adapters/      CsvExcelConnector
+  adapters/      CsvExcelConnector (los conectores opcionales van en subpaquetes)
   application/   validación, confirmaciones (ConfirmacionStore), auditoría, servicio
   mcp_server/    servidor MCP (MCPServer del SDK oficial)
   config/        settings (pydantic-settings)
   composicion.py arma el servicio con el conector de .env
 scripts/generar_datos.py
+data/            datos sintéticos generados (CSV)
 tests/
-docs/            documentación (análisis de Canaan360)
 ```
 
-Las decisiones de arquitectura y las reglas están en [CLAUDE.md](CLAUDE.md).
+Las decisiones de arquitectura y las reglas del proyecto están en [CLAUDE.md](CLAUDE.md).

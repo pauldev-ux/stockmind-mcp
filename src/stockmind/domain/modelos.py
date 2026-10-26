@@ -1,8 +1,8 @@
 """Modelo común de inventario, independiente de cualquier ERP.
 
-Decisiones pensadas para que entren ERPs reales como Canaan360 sin atarse a ellos:
+Decisiones pensadas para que entren ERPs reales sin atarse a ninguno:
 - Los ids son texto: sirven igual para BIGINT de MySQL que para códigos de un CSV.
-- `codigo` es opcional y no se asume único (en Canaan360 no lo es).
+- `codigo` es opcional y no se asume único (en algunos ERP no lo es).
 - El stock es un total; el desglose por almacén y los lotes son opcionales.
 - La cantidad de un movimiento siempre es positiva; el signo lo da el tipo
   (o `sentido`, en los ajustes), igual que en un kardex.
@@ -56,7 +56,7 @@ class Producto(BaseModel):
     # Lotes con stock disponible, en orden FEFO, solo cuando el ERP los maneja.
     lotes: list[Lote] | None = None
     # Datos propios del ERP que no tienen lugar en el modelo común
-    # (p. ej. tipo o moneda en Canaan360).
+    # (p. ej. tipo de producto o moneda).
     atributos: dict[str, Any] = Field(default_factory=dict)
 
     @property

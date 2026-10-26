@@ -1,6 +1,6 @@
 """Puerto: lo que StockMind necesita de cualquier ERP.
 
-Cada adaptador (CSV/Excel, Canaan360…) implementa esta interfaz. Los adaptadores
+Cada adaptador (CSV/Excel, conectores para ERPs reales…) implementa esta interfaz. Los adaptadores
 solo hacen E/S y traducen al modelo común; la validación, la confirmación y la
 auditoría viven en `application/` y no se repiten en cada adaptador.
 """

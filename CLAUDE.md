@@ -2,7 +2,25 @@
 
 StockMind es un asistente de inventario con IA que se conecta a cualquier ERP
 por MCP. Es el proyecto de grado (UAGRM) del autor. Todo corre en localhost,
-en Windows.
+en Windows. **El repositorio es público.**
+
+> Si existe `docs/CLAUDE-privado.md` (local, no versionado), léelo al empezar.
+> Tiene las reglas y los detalles del conector privado para un ERP real.
+
+## Reglas permanentes del autor (prioridad máxima)
+
+- **NUNCA hagas commits ni otras operaciones de git que cambien el índice o el
+  historial** (add, rm, commit, amend, rebase, reset, merge, push, tag, stash…).
+  Los commits los hace el autor. Sí se permiten consultas: `git status`,
+  `git diff`, `git log`, `git ls-files`, `git check-ignore`.
+- **NUNCA modifiques el ERP real, su código ni su base de datos.** Contra su
+  base solo se ejecutan consultas: nada de INSERT, UPDATE, DELETE, ALTER,
+  CREATE, DROP, GRANT ni crear usuarios. Los tests de integración tampoco
+  intentan escribir, ni siquiera para comprobar que falla.
+- **Nada interno del ERP real en archivos públicos.** Ni nombres, ni tablas, ni
+  rutas locales, ni errores del ERP. Eso va en `docs/` o en el conector
+  privado, que están en `.gitignore`. En lo público se dice solo "conector para
+  un ERP real (privado)".
 
 ## Entorno
 
@@ -10,8 +28,9 @@ en Windows.
   (`D:\UAGRM\Taller de Grado`): comillas siempre.
 - Python **3.14** en `.venv` (`py -3.14 -m venv .venv`). Hay un Python 3.10
   instalado, pero no sirve porque el mínimo es 3.11.
-  Las dependencias están fijadas en `requirements.txt`, que también instala el
-  paquete con `-e .`.
+  - Las dependencias están fijadas en `requirements.txt`, que también instala
+    el paquete con `-e .`.
+  - Los conectores con MySQL usan el extra `pip install -e ".[mysql]"`.
 - Comandos: `.\.venv\Scripts\python.exe -m pytest`,
   `python scripts\generar_datos.py [--forzar] [--formato xlsx]`, y el servidor
   con `.\.venv\Scripts\stockmind-mcp.exe` (stdio).
@@ -20,8 +39,7 @@ en Windows.
   existe. Los tests usan `mcp.Client(servidor)` en el mismo proceso.
 - MCP Inspector 2.x pide Node ≥ 22.19. La máquina tiene 22.12, así que se usa
   `npx @modelcontextprotocol/inspector@1`.
-- `docs/` es documentación del autor: **no borrar**.
-  `docs/analisis-canaan360.md` describe el primer ERP real.
+- `docs/` es documentación privada del autor: **no borrar** (está en `.gitignore`).
 
 ## Arquitectura (hexagonal)
 
@@ -41,32 +59,54 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 - `adapters/`: solo E/S y traducción al modelo común. **No** validan entradas
   de usuario ni emiten tokens, pero **sí** rechazan el stock negativo como
   segunda barrera (`StockInsuficiente`).
+- **Conectores de solo lectura.** El puerto tiene `admite_escritura` (por
+  defecto `True`). Si es `False`, el servicio lanza `EscrituraNoHabilitada`
+  **antes** de validar o emitir un token, y también al confirmar.
+  `nombre_visible` es el nombre que se muestra en los mensajes.
 - `application/servicio.py`: lo usan el servidor MCP y, más adelante, un
   backend **FastAPI** en otro proceso con `construir_servicio(origen="web")`.
   No metas lógica de negocio en `mcp_server/`.
 
-### Modelo común: decisiones por Canaan360
+### Conectores incluidos y opcionales
 
-- **Ids:** son `str`. Canaan usa BIGINT; el CSV, `P0001`.
+- **Incluidos:** `composicion.CONECTORES` (hoy, `csv`).
+- **Opcionales:** cualquier subpaquete `stockmind.adapters.<nombre>` que
+  exponga `crear_conector(settings)`. Se elige con `CONNECTOR=<nombre>`.
+  - Si el paquete no existe, el error lo dice con claridad.
+  - Si le falta una dependencia, sugiere el extra `[mysql]`.
+- **Privados:** por convención, todo subpaquete de `adapters/` y
+  `tests/privados/` están en `.gitignore`.
+  - Cada conector lee su propia configuración del mismo `.env`, con su
+    propio prefijo.
+  - **El código público no puede importar nada de un conector privado.**
+  - Los tests públicos deben pasar sin él.
+
+### Modelo común
+
+- **Ids:** son `str`, para que sirvan igual los BIGINT de una base que los
+  códigos del CSV (`P0001`).
 - **`codigo`:** es opcional y **no único**. `obtener_producto` busca por id y
   luego por código; si el código se repite, lanza `CodigoAmbiguo` con los
   candidatos.
 - **Stock:**
   - `stock_actual` es el total.
-  - `stock_por_almacen`, `almacen` y `Lote` son opcionales, porque Canaan
-    tiene almacenes por empresa y lotes con FEFO.
-  - El FEFO lo resuelve el adaptador de cada ERP, no el dominio.
+  - `stock_por_almacen`, `almacen` y `Producto.lotes` son opcionales, para
+    ERPs con varios almacenes y lotes (FEFO).
+  - El FEFO lo resuelve el adaptador de cada ERP, no el dominio. Los lotes van
+    ya ordenados.
 - **Movimientos:**
   - `cantidad` siempre es mayor que 0.
-  - El signo lo da `tipo` (entrada `+`, salida `-`) o `sentido` en los
-    ajustes. Se mapea a `ajuste_positivo`/`ajuste_negativo` del kardex.
-  - `saldo` es el saldo después del movimiento (`saldo_cantidad`).
-- **Datos propios del ERP:** van en `Producto.atributos`, p. ej. tipo o moneda
-  en Canaan.
+  - El signo lo da `tipo` (entrada `+`, salida `-`) o `sentido` en los ajustes.
+  - `saldo` es el saldo después del movimiento; en un ERP puede ser por almacén.
+  - Los datos propios del ERP van en `MovimientoInventario.atributos`.
+    **Excluirlo** al guardar los datos de una operación: si no, la
+    revalidación lo rechaza como campo desconocido.
+- **Datos propios del ERP:** van en `Producto.atributos` (tipo de producto,
+  moneda…).
 - **Campos obligatorios:** cambian por ERP. `campos_obligatorios_producto()`
   del conector se combina con `CAMPOS_COMUNES_PRODUCTO`.
-- **Crear un producto no crea stock**, igual que en Canaan. El stock entra
-  con un movimiento `entrada`.
+- **Crear un producto no crea stock.** El stock entra con un movimiento
+  `entrada`.
 
 ## Reglas (no romper)
 
@@ -84,8 +124,7 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
    - Un token cuya confirmación falla queda gastado: hay que preparar de nuevo.
 3. **Validar antes de escribir** y devolver en español `faltantes` e
    `invalidos`, para que la IA se los pida al usuario.
-   - Los campos desconocidos se **rechazan**, no se ignoran. En Canaan se
-     perdía `motivo` en silencio.
+   - Los campos desconocidos se **rechazan**, no se descartan en silencio.
    - Se aceptan la coma decimal y las fechas `DD/MM/AAAA`.
    - En salidas y ajustes, `motivo` es obligatorio.
    - No se aceptan fechas futuras.
@@ -99,6 +138,8 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
    `_seguro`.
 7. **stdio:** stdout es el protocolo. Los logs van a stderr; **nunca `print`
    en el servidor**.
+8. **`.env`:** con `env_ignore_empty=True`, una variable vacía cuenta como no
+   definida y no rompe el arranque.
 
 ## Conector CSV/Excel
 
@@ -124,23 +165,18 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 - **Inventario:** política de punto de pedido.
 - **Reproducibilidad:** los tests comprueban que el kardex cuadra con el stock
   y con las ventas, y que el resultado se repite con la misma semilla.
+- **Publicación:** los CSV de `data/` se versionan; la base `data/stockmind.db`, no.
 
-Son **sintéticos**: el análisis de Canaan360 muestra que no hay historial
-real suficiente para predecir.
+Son **sintéticos**, porque el ERP real todavía no tiene historial suficiente
+para predecir.
 
 ## Próximos pasos previstos
 
-- **`Canaan360Connector`:**
-  - Conexión directa a MySQL, porque Canaan no tiene API ni Sanctum en uso.
-  - Siempre con `empresa_id`.
-  - Stock: `SUM(cantidad_disponible)` de `cerecom_stock_actual`.
-  - Kardex: `cerecom_kardex` con `estado='activo'`.
-  - Ventas: ventas `confirmado` desde `venta_detalles`.
-  - Lo que falte por resolver está en "Dudas" de `docs/analisis-canaan360.md`.
+- **Escrituras en conectores de solo lectura:**
+  - La operación confirmada va a una **bandeja de salida** local (`exports/`,
+    ignorada).
+  - Se exporta al formato de importación del ERP.
+  - Cada operación pendiente lleva una **guía paso a paso** para registrarla.
 - **Backend FastAPI** con chat propio, que reutilice `construir_servicio(origen="web")`.
 - **Predicción de demanda y punto de reorden**, a partir de `ventas_por_producto`
   y del kardex.
-
-Para agregar un conector: implementa `InventarioConnector` en `adapters/`,
-regístralo en `composicion.CONECTORES` y escribe tests con datos de prueba,
-sin tocar la BD real.

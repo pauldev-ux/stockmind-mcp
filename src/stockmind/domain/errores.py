@@ -46,7 +46,7 @@ class ProductoNoEncontrado(StockMindError):
 
 
 class CodigoAmbiguo(StockMindError):
-    """El código coincide con varios productos (en Canaan360 el código no es único)."""
+    """El código coincide con varios productos (en algunos ERP el código no es único)."""
 
     def __init__(self, codigo: str, candidatos: list[dict[str, Any]]):
         super().__init__(f"El código '{codigo}' corresponde a {len(candidatos)} productos; indica el id.")

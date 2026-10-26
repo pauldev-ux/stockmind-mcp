@@ -19,6 +19,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8"]
+# Para conectores opcionales que leen de MySQL
+mysql = ["SQLAlchemy>=2.0", "PyMySQL>=1.1"]
 
 [project.scripts]
 stockmind-mcp = "stockmind.mcp_server.server:main"
@@ -29,3 +31,6 @@ where = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integracion: usa la base de datos de un ERP real (solo lectura); se salta si no está configurada",
+]

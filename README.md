@@ -77,7 +77,9 @@ Cubren:
 - las tools MCP de punta a punta;
 - la coherencia del generador;
 - la carga de conectores opcionales;
-- la bandeja de salida con conectores falsos (estados, stock comprometido, exportar, verificar).
+- la bandeja de salida con conectores falsos (estados, stock comprometido, exportar, verificar);
+- los reportes, con un CSV armado a mano cuyos resultados se calculan en papel (ABC, cobertura,
+  rotación) y con los datos sintéticos.
 
 Los tests públicos no necesitan ningún conector privado.
 
@@ -113,6 +115,33 @@ solo se ejecutan consultas.
   `READ ONLY` y una guardia en el código que rechaza cualquier sentencia que no
   sea una consulta.
 - Todo el SQL va parametrizado.
+
+## Reportes de inventario
+
+Se calculan solo con los métodos del puerto, así que funcionan con cualquier
+conector.
+
+- **Cómo se justifican:** cada reporte trae `metodo` (cómo se calculó, con los
+  números usados) y `avisos`.
+- **Sin datos suficientes** (p. ej. sin ventas en el período), el valor queda en
+  `null`, `sin_datos` en `true` y el aviso lo explica: **nunca un cero
+  engañoso**.
+
+| Tool | Qué calcula | Período por defecto |
+|---|---|---|
+| `reporte_mas_vendidos` | Top N por unidades y por monto, con % de participación | 30 días |
+| `reporte_bajo_stock` | Stock < mínimo con **días de cobertura** (stock / venta diaria) y **sugerido a reponer** = máx(0, ⌈máx(mínimo, venta diaria × días objetivo) − stock⌉) | ventas de 30 días |
+| `reporte_sin_movimiento` | Sin ventas ni salidas en N días, con **capital inmovilizado** (stock × costo) y última salida | 90 días |
+| `reporte_abc` | Clasificación ABC por monto (A ≈ 80 %, B ≈ 15 %, C ≈ 5 %, configurables), con % acumulado | 90 días |
+| `reporte_rotacion` | **Rotación** = costo de lo vendido / inventario promedio, días de inventario, otras salidas aparte, y **valorización** al costo y a precio de venta, por categoría | 90 días |
+| `resumen_ejecutivo` | Lo más importante de todos, en pocas líneas (`hallazgos`) | 30 días |
+
+- **Parámetros:** `desde`/`hasta` (AAAA-MM-DD) **o** `ultimos_dias`; `categoria`
+  y `almacen` donde aplica.
+- **Exportar:** `exportar=true` guarda un `.xlsx` en `exports/`, con una hoja
+  "Cómo se calculó".
+- **Monedas:** los totales salen por moneda (`Producto.moneda`, o `MONEDA_BASE`
+  si no la informa).
 
 ## Bandeja de salida (ERP de solo lectura)
 
@@ -220,7 +249,8 @@ Si no aparece, revisa `%APPDATA%\Claude\logs\mcp-server-stockmind.log`.
 | `CONFIRMACIONES_DB` | `data/stockmind.db` | SQLite local: tokens y bandeja de salida, compartido entre procesos |
 | `TOKEN_TTL_MINUTOS` | `10` | Vigencia del token |
 | `AUDITORIA_LOG` | `logs/auditoria.jsonl` | Log de auditoría |
-| `EXPORTS_DIR` | `exports` | Archivos de `exportar_pendientes` (ignorada por git) |
+| `EXPORTS_DIR` | `exports` | Archivos de `exportar_pendientes` y de los reportes (ignorada por git) |
+| `MONEDA_BASE` | `BOB` | Moneda de los productos que no informan una |
 | `LOG_LEVEL` | `INFO` | Los logs van a stderr |
 
 Las rutas relativas se resuelven desde la raíz del proyecto. Una variable vacía cuenta como no definida. Los conectores opcionales documentan sus propias variables.
@@ -240,6 +270,7 @@ Las rutas relativas se resuelven desde la raíz del proyecto. Una variable vací
 | `confirmar_operacion(token)` | escribe | Ejecuta la operación preparada |
 | `cancelar_operacion(token)` | — | Descarta la operación preparada |
 | `listar_pendientes`, `exportar_pendientes`, `verificar_pendientes`, `marcar_registrada`, `descartar_pendiente` | bandeja | Ver "Bandeja de salida" |
+| `reporte_mas_vendidos`, `reporte_bajo_stock`, `reporte_sin_movimiento`, `reporte_abc`, `reporte_rotacion`, `resumen_ejecutivo` | lectura | Ver "Reportes de inventario" |
 
 ## Estructura
 
@@ -248,7 +279,7 @@ src/stockmind/
   domain/        modelo común (Pydantic) y errores
   ports/         InventarioConnector e IntegracionBandeja (interfaces abstractas)
   adapters/      CsvExcelConnector (los conectores opcionales van en subpaquetes)
-  application/   validación, confirmaciones (ConfirmacionStore), bandeja (BandejaStore), auditoría, servicio
+  application/   validación, confirmaciones (ConfirmacionStore), bandeja (BandejaStore), reportes, auditoría, servicio
   mcp_server/    servidor MCP (MCPServer del SDK oficial)
   config/        settings (pydantic-settings)
   composicion.py arma el servicio con el conector de .env

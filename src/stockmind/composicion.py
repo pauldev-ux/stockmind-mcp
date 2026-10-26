@@ -72,5 +72,6 @@ def construir_servicio(settings: Settings | None = None, *, origen: str = "mcp")
         # Misma base local que los tokens: así el servidor MCP y el backend web la comparten.
         bandeja=SqliteBandejaStore(settings.confirmaciones_db),
         exports_dir=settings.exports_dir,
+        moneda_base=settings.moneda_base,
         origen=origen,
     )

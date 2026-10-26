@@ -32,8 +32,11 @@ class Settings(BaseSettings):
 
     auditoria_log: Path = Path("logs/auditoria.jsonl")
 
-    # Archivos que genera exportar_pendientes (bandeja de salida)
+    # Archivos que genera exportar_pendientes (bandeja de salida) y los reportes
     exports_dir: Path = Path("exports")
+
+    # Moneda de los productos que no informan una (los totales nunca mezclan monedas)
+    moneda_base: str = "BOB"
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

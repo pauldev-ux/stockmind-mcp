@@ -16,8 +16,11 @@ from typing import Any
 from stockmind.application.auditoria import Auditoria
 from stockmind.application.bandeja import BandejaStore, IntegracionGenerica, normalizar
 from stockmind.application.confirmaciones import GestorConfirmaciones, OperacionPendiente, ahora_utc, hash_token
+from stockmind.application.exportar_reportes import exportar_reporte
+from stockmind.application.reportes import ServicioReportes
 from stockmind.application.validacion import construir_movimiento, esquema_producto, revisar_stock, validar_producto
 from stockmind.domain.bandeja import EstadoBandeja, OperacionBandeja, parsear_referencia, referencia
+from stockmind.domain.reportes import Reporte
 from stockmind.domain.errores import (
     BandejaNoDisponible,
     EscrituraNoHabilitada,
@@ -72,6 +75,7 @@ class InventarioService:
         *,
         bandeja: BandejaStore | None = None,
         exports_dir: Path | None = None,
+        moneda_base: str = "BOB",
         origen: str = "mcp",
         hoy: Callable[[], date] = date.today,
         reloj: Callable[[], datetime] = ahora_utc,
@@ -84,6 +88,7 @@ class InventarioService:
         self.origen = origen
         self.hoy = hoy
         self.reloj = reloj
+        self.reportes = ServicioReportes(conector, hoy=hoy, reloj=reloj, moneda_base=moneda_base)
         self.integracion: IntegracionBandeja = (
             conector if isinstance(conector, IntegracionBandeja) else IntegracionGenerica(conector.nombre_visible)
         )
@@ -117,10 +122,14 @@ class InventarioService:
         return p, movimientos[-_limitar(limite, 1, 1000):], len(movimientos)
 
     def ventas_por_producto(
-        self, desde: date | None = None, hasta: date | None = None, limite: int = 50
+        self, desde: date | None = None, hasta: date | None = None, limite: int = 50, almacen: str | None = None
     ) -> list[ResumenVentasProducto]:
         _validar_rango(desde, hasta)
-        return self.conector.ventas_por_producto(desde, hasta)[: _limitar(limite, 1, 1000)]
+        return self.conector.ventas_por_producto(desde, hasta, almacen)[: _limitar(limite, 1, 1000)]
+
+    def exportar_reporte(self, reporte: Reporte) -> Path:
+        """Guarda el reporte en .xlsx dentro de exports/ y devuelve la ruta."""
+        return exportar_reporte(reporte, self.exports_dir, self.reloj())
 
     def campos_producto(self) -> dict[str, Any]:
         esquema = esquema_producto(self.conector)

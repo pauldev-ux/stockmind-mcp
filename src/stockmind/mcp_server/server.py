@@ -48,6 +48,11 @@ Modo "bandeja" (ERP que no admite escritura directa):
   marca solo; las "posibles" coincidencias se las muestras al usuario para que
   decida con marcar_registrada.
 - marcar_registrada y descartar_pendiente cambian el estado a pedido del usuario.
+
+Reportes (reporte_* y resumen_ejecutivo):
+- Para justificar una cifra, usa el campo "metodo" del reporte.
+- Si "sin_datos" es true o hay "avisos", díselo al usuario tal cual. Un valor
+  null significa que no se pudo calcular, no que valga cero.
 """
 
 _LECTURA = ToolAnnotations(readOnlyHint=True, openWorldHint=False)
@@ -132,10 +137,11 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
 
     @mcp.tool(annotations=_LECTURA)
     @_seguro
-    def ventas_por_producto(desde: str | None = None, hasta: str | None = None, limite: int = 50) -> dict[str, Any]:
+    def ventas_por_producto(desde: str | None = None, hasta: str | None = None, limite: int = 50,
+                            almacen: str | None = None) -> dict[str, Any]:
         """Unidades y monto vendidos por producto en un rango de fechas (AAAA-MM-DD, inclusivo),
         ordenados de mayor a menor cantidad. Sin fechas usa todo el historial."""
-        resumen = servicio.ventas_por_producto(_fecha("desde", desde), _fecha("hasta", hasta), limite)
+        resumen = servicio.ventas_por_producto(_fecha("desde", desde), _fecha("hasta", hasta), limite, almacen)
         return {"ok": True, "desde": desde, "hasta": hasta, "productos": [r.model_dump(mode="json") for r in resumen]}
 
     @mcp.tool(annotations=_LECTURA)
@@ -233,6 +239,75 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
         """Descarta una operación pendiente (p. ej. SM-000012): no se registrará en el ERP.
         El motivo es obligatorio. Usar solo cuando el usuario lo indique."""
         return servicio.descartar_pendiente(id, motivo)
+
+    # ------------------------------------------------------------- reportes
+
+    def _reporte(reporte, exportar: bool) -> dict[str, Any]:
+        respuesta = {"ok": True, **reporte.model_dump(mode="json")}
+        if exportar:
+            respuesta["archivo"] = str(servicio.exportar_reporte(reporte))
+        return respuesta
+
+    rep = servicio.reportes
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def reporte_mas_vendidos(desde: str | None = None, hasta: str | None = None, ultimos_dias: int | None = None,
+                             top: int = 10, categoria: str | None = None, almacen: str | None = None,
+                             exportar: bool = False) -> dict[str, Any]:
+        """Top N de productos por unidades y por monto vendido. Período: desde/hasta (AAAA-MM-DD)
+        o ultimos_dias (por defecto, los últimos 30). exportar=true guarda un .xlsx en exports/."""
+        return _reporte(rep.mas_vendidos(_fecha("desde", desde), _fecha("hasta", hasta), ultimos_dias, top,
+                                         categoria, almacen), exportar)
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def reporte_bajo_stock(dias_ventas: int = 30, dias_objetivo: int = 30, cobertura_menor_a: float | None = None,
+                           categoria: str | None = None, almacen: str | None = None,
+                           exportar: bool = False) -> dict[str, Any]:
+        """Productos bajo el stock mínimo con días de cobertura (stock / venta diaria de los últimos
+        dias_ventas) y cantidad sugerida a reponer para cubrir dias_objetivo. cobertura_menor_a agrega
+        productos sobre el mínimo pero con poca cobertura."""
+        return _reporte(rep.bajo_stock(dias_ventas, dias_objetivo, cobertura_menor_a, categoria, almacen), exportar)
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def reporte_sin_movimiento(dias: int = 90, categoria: str | None = None, almacen: str | None = None,
+                               solo_con_stock: bool = True, exportar: bool = False) -> dict[str, Any]:
+        """Productos sin ventas ni salidas en los últimos `dias` días, con su capital inmovilizado
+        (stock × costo) y la fecha de su última salida."""
+        return _reporte(rep.sin_movimiento(dias, categoria, almacen, solo_con_stock), exportar)
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def reporte_abc(desde: str | None = None, hasta: str | None = None, ultimos_dias: int | None = None,
+                    porcentaje_a: float = 80, porcentaje_b: float = 15, categoria: str | None = None,
+                    almacen: str | None = None, exportar: bool = False) -> dict[str, Any]:
+        """Clasificación ABC por monto vendido (A ≈ 80 %, B ≈ 15 %, C el resto; umbrales configurables),
+        con porcentaje y porcentaje acumulado. Período por defecto: últimos 90 días."""
+        return _reporte(rep.abc(_fecha("desde", desde), _fecha("hasta", hasta), ultimos_dias, porcentaje_a,
+                                porcentaje_b, categoria, almacen), exportar)
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def reporte_rotacion(desde: str | None = None, hasta: str | None = None, ultimos_dias: int | None = None,
+                         categoria: str | None = None, almacen: str | None = None,
+                         exportar: bool = False) -> dict[str, Any]:
+        """Rotación del inventario (costo de lo vendido / inventario promedio), días de inventario y
+        valorización del stock al costo y a precio de venta, total y por categoría, separados por moneda.
+        Período por defecto: últimos 90 días."""
+        return _reporte(rep.rotacion(_fecha("desde", desde), _fecha("hasta", hasta), ultimos_dias,
+                                     categoria, almacen), exportar)
+
+    @mcp.tool(annotations=_LECTURA)
+    @_seguro
+    def resumen_ejecutivo(desde: str | None = None, hasta: str | None = None, ultimos_dias: int | None = None,
+                          categoria: str | None = None, almacen: str | None = None,
+                          exportar: bool = False) -> dict[str, Any]:
+        """Resumen ejecutivo del inventario en pocas líneas (hallazgos): ventas, más vendidos, bajo stock,
+        sin movimiento, ABC, valorización y rotación. Período por defecto: últimos 30 días."""
+        return _reporte(rep.resumen_ejecutivo(_fecha("desde", desde), _fecha("hasta", hasta), ultimos_dias,
+                                              categoria, almacen), exportar)
 
     return mcp
 

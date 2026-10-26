@@ -67,6 +67,8 @@ class Producto(BaseModel):
     proveedor: str | None = None
     almacen: str | None = None
     activo: bool = True
+    # Moneda de costo y precio. None = la moneda base de StockMind (MONEDA_BASE).
+    moneda: str | None = None
     # Desglose opcional {almacén: cantidad} para ERPs con varios almacenes.
     stock_por_almacen: dict[str, float] | None = None
     # Lotes con stock disponible, en orden FEFO, solo cuando el ERP los maneja.
@@ -161,6 +163,34 @@ class Venta(BaseModel):
     almacen: str | None = None
     total: float = Field(ge=0)
     detalles: list[DetalleVenta] = Field(default_factory=list)
+
+
+class ResumenMovimientosProducto(BaseModel):
+    """Totales de movimientos de un producto en un rango de fechas."""
+
+    producto_id: str
+    entradas: float = 0
+    salidas: float = 0
+    numero_movimientos: int = 0
+    ultima_entrada: date | None = None
+    ultima_salida: date | None = None
+
+    @property
+    def neto(self) -> float:
+        return self.entradas - self.salidas
+
+
+def resumir_movimientos(producto_id: str, movimientos: list["MovimientoInventario"]) -> ResumenMovimientosProducto:
+    entradas = [m for m in movimientos if m.delta > 0]
+    salidas = [m for m in movimientos if m.delta < 0]
+    return ResumenMovimientosProducto(
+        producto_id=producto_id,
+        entradas=sum(m.cantidad for m in entradas),
+        salidas=sum(m.cantidad for m in salidas),
+        numero_movimientos=len(movimientos),
+        ultima_entrada=max((m.fecha for m in entradas), default=None),
+        ultima_salida=max((m.fecha for m in salidas), default=None),
+    )
 
 
 class ResumenVentasProducto(BaseModel):

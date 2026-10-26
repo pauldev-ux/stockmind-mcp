@@ -54,6 +54,13 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 - `domain/`: modelos Pydantic y errores, sin dependencias de infraestructura.
 - `ports/inventario.py`: el contrato que implementa cada ERP.
   - Tiene 8 métodos abstractos.
+    `ventas_por_producto(desde, hasta, almacen=None)` acepta el filtro por almacén.
+  - Tiene **métodos con implementación por defecto**, que un conector con base
+    de datos debería optimizar:
+    - `listar_productos()`, que usa `buscar_productos("")`;
+    - `resumen_movimientos(desde, hasta, almacen)`, que da por producto
+      entradas, salidas, neto y última entrada y salida, recorriendo
+      `listar_movimientos`.
   - Tiene un gancho opcional, `validar_producto_nuevo`, para reglas que
     necesitan los datos del ERP (nombre único…).
 - `adapters/`: solo E/S y traducción al modelo común. **No** validan entradas
@@ -115,8 +122,8 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
   - Los datos propios del ERP van en `MovimientoInventario.atributos`.
     **Excluirlo** al guardar los datos de una operación: si no, la
     revalidación lo rechaza como campo desconocido.
-- **Datos propios del ERP:** van en `Producto.atributos` (tipo de producto,
-  moneda…).
+- **Moneda:** `Producto.moneda` (opcional; si es `None`, se usa `MONEDA_BASE`).
+- **Datos propios del ERP:** van en `Producto.atributos` (p. ej. el tipo de producto).
 - **Campos obligatorios:** cambian por ERP. `campos_obligatorios_producto()`
   del conector se combina con `CAMPOS_COMUNES_PRODUCTO`.
 - **Crear un producto no crea stock.** El stock entra con un movimiento
@@ -191,6 +198,54 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
   piden a la IA.
 - **Auditoría:** `encolada`, `exportada`, `registrada` y `descartada`, con el
   campo `referencia`.
+
+## Reportes (`application/reportes.py`, `domain/reportes.py`)
+
+- **Genéricos:** usan solo métodos del puerto, así que funcionan con cualquier
+  conector. `ServicioReportes` vive en `InventarioService.reportes`.
+- **Modelos:** cada reporte es un Pydantic que hereda de `Reporte`.
+  - Campos comunes: `periodo`, `filtros`, **`metodo`** (pasos del cálculo con
+    los números usados) y **`avisos`**.
+  - **`sin_datos`:** sin datos, el valor queda en `None` y hay un aviso;
+    **nunca un cero engañoso**.
+- **Período:** `desde`/`hasta` o `ultimos_dias` (terminan hoy), nunca los dos.
+  - Por defecto: 30 días para más vendidos, bajo stock y resumen; 90 para sin
+    movimiento, ABC y rotación.
+  - No se aceptan fechas futuras.
+- **Filtros:** `categoria` (sobre `Producto.categoria`) y `almacen` (stock con
+  `stock_en`, y ventas y movimientos filtrados por el conector).
+- **Fórmulas:**
+  - **Bajo stock:**
+    - Entra si `stock < stock_minimo`, o si se pasa `cobertura_menor_a`.
+    - Venta diaria = vendido en `dias_ventas` / `dias_ventas`.
+    - Cobertura = stock / venta diaria; sin ventas del producto es `None`.
+    - Sugerido = `max(0, ⌈max(stock_minimo, venta diaria × dias_objetivo) − stock⌉)`.
+      Sin tiempo de entrega ni stock de seguridad: eso es para la fase de
+      predicción.
+  - **Sin movimiento:** sin ventas ni salidas en N días. Capital = stock × costo,
+    sumado por moneda.
+  - **ABC:**
+    - La clase se decide por el acumulado **antes** del producto: menos de A es
+      A, menos de A + B es B, y el resto C.
+    - Así el producto que cruza el 80 % queda en A.
+    - Los productos sin ventas van aparte.
+  - **Rotación:**
+    - Costo de lo **vendido** (unidades × costo actual) / inventario promedio.
+    - Inventario inicial = stock − neto desde el inicio del período; final =
+      stock − neto posterior al período.
+    - Las **otras salidas** (producción, mermas, transferencias) se informan
+      aparte y no entran en la rotación.
+  - **Valorización:** stock × costo y stock × precio, por categoría y por moneda.
+    - Avisa si hay productos con stock y precio o costo en 0 (dato sin cargar).
+  - **Resumen ejecutivo:** combina los anteriores y arma los `hallazgos` con
+    reglas fijas.
+- **Monedas:** `Producto.moneda`; si es `None`, se usa `MONEDA_BASE`. **Los
+  totales nunca mezclan monedas.** Los montos de ventas van en la moneda base
+  que informa el conector.
+- **Exportación:** con `exportar=True`, `application/exportar_reportes.py` genera
+  `exports/reporte_<tipo>_<sello>.xlsx`, con una hoja por lista y "Cómo se calculó".
+- **Tests:** `tests/test_reportes.py` usa un CSV armado a mano; los resultados
+  están calculados en el docstring.
 
 ## Conector CSV/Excel
 

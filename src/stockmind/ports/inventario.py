@@ -16,9 +16,12 @@ from stockmind.domain.modelos import (
     MovimientoInventario,
     Producto,
     ProductoNuevo,
+    ResumenMovimientosProducto,
     ResumenVentasProducto,
     Revision,
+    resumir_movimientos,
 )
+from stockmind.domain.texto import normalizar
 
 
 class InventarioConnector(ABC):
@@ -53,9 +56,10 @@ class InventarioConnector(ABC):
 
     @abstractmethod
     def ventas_por_producto(
-        self, desde: date | None = None, hasta: date | None = None
+        self, desde: date | None = None, hasta: date | None = None, almacen: str | None = None
     ) -> list[ResumenVentasProducto]:
-        """Cantidad y monto vendidos por producto en el rango (inclusivo)."""
+        """Cantidad y monto vendidos por producto en el rango (inclusivo), opcionalmente de un almacén.
+        El monto va en la moneda base de StockMind."""
 
     @abstractmethod
     def crear_producto(self, datos: ProductoNuevo) -> Producto:
@@ -72,6 +76,29 @@ class InventarioConnector(ABC):
     @abstractmethod
     def campos_obligatorios_producto(self) -> list[CampoRequerido]:
         """Campos que este ERP exige para crear un producto."""
+
+    # ---- métodos con implementación por defecto (los conectores pueden optimizarlos)
+
+    def listar_productos(self) -> list[Producto]:
+        """Todos los productos, activos e inactivos."""
+        return self.buscar_productos("", limite=1_000_000_000)
+
+    def resumen_movimientos(
+        self, desde: date | None = None, hasta: date | None = None, almacen: str | None = None
+    ) -> list[ResumenMovimientosProducto]:
+        """Entradas, salidas y fechas de último movimiento por producto en el rango (inclusivo).
+
+        Por defecto recorre listar_movimientos producto por producto; un conector con
+        base de datos debería resolverlo en una sola consulta.
+        """
+        resumenes = []
+        for producto in self.listar_productos():
+            movimientos = self.listar_movimientos(producto.id, desde, hasta)
+            if almacen:
+                movimientos = [m for m in movimientos if m.almacen and normalizar(m.almacen) == normalizar(almacen)]
+            if movimientos:
+                resumenes.append(resumir_movimientos(producto.id, movimientos))
+        return resumenes
 
     def validar_producto_nuevo(self, datos: ProductoNuevo) -> list[ErrorCampo]:
         """Reglas propias del ERP que requieren consultar sus datos (p. ej. nombre único).

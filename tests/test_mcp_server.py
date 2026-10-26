@@ -28,6 +28,8 @@ async def test_expone_las_tools_del_puerto(servicio):
         "confirmar_operacion", "cancelar_operacion",
         "listar_pendientes", "exportar_pendientes", "verificar_pendientes", "marcar_registrada",
         "descartar_pendiente",
+        "reporte_mas_vendidos", "reporte_bajo_stock", "reporte_sin_movimiento", "reporte_abc",
+        "reporte_rotacion", "resumen_ejecutivo",
     }
 
 

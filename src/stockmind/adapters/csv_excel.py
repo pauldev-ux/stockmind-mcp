@@ -35,6 +35,7 @@ from stockmind.domain.modelos import (
     MovimientoInventario,
     Producto,
     ProductoNuevo,
+    ResumenMovimientosProducto,
     ResumenVentasProducto,
 )
 from stockmind.ports.inventario import InventarioConnector
@@ -302,15 +303,60 @@ class CsvExcelConnector(InventarioConnector):
         movimientos = [_fila_a_movimiento(f) for f in df.to_dict("records")]
         return sorted(movimientos, key=lambda m: (m.fecha, _numero_de_id(m.id or "")))
 
+    def listar_productos(self) -> list[Producto]:
+        return self._productos()
+
+    def resumen_movimientos(
+        self, desde: date | None = None, hasta: date | None = None, almacen: str | None = None
+    ) -> list[ResumenMovimientosProducto]:
+        df = self._leer("movimientos")
+        fechas = df["fecha"].str[:10]
+        filtro = pd.Series(True, index=df.index)
+        if desde:
+            filtro &= fechas >= desde.isoformat()
+        if hasta:
+            filtro &= fechas <= hasta.isoformat()
+        if almacen:
+            filtro &= df["almacen"].map(normalizar) == normalizar(almacen)
+        df, fechas = df[filtro], fechas[filtro]
+        if df.empty:
+            return []
+        cantidad = pd.to_numeric(df["cantidad"].str.replace(",", "."), errors="coerce").fillna(0)
+        entra = df["sentido"].str.strip() == "+"
+        tabla = pd.DataFrame({
+            "producto_id": df["producto_id"],
+            "entradas": cantidad.where(entra, 0.0),
+            "salidas": cantidad.where(~entra, 0.0),
+            "fecha_entrada": fechas.where(entra),
+            "fecha_salida": fechas.where(~entra),
+        })
+        agrupado = tabla.groupby("producto_id").agg(
+            entradas=("entradas", "sum"), salidas=("salidas", "sum"), numero=("entradas", "size"),
+            ultima_entrada=("fecha_entrada", "max"), ultima_salida=("fecha_salida", "max"),
+        )
+        return [
+            ResumenMovimientosProducto(
+                producto_id=pid,
+                entradas=round(float(f.entradas), 4),
+                salidas=round(float(f.salidas), 4),
+                numero_movimientos=int(f.numero),
+                ultima_entrada=_fecha(f.ultima_entrada) if isinstance(f.ultima_entrada, str) else None,
+                ultima_salida=_fecha(f.ultima_salida) if isinstance(f.ultima_salida, str) else None,
+            )
+            for pid, f in agrupado.iterrows()
+        ]
+
     def ventas_por_producto(
-        self, desde: date | None = None, hasta: date | None = None
+        self, desde: date | None = None, hasta: date | None = None, almacen: str | None = None
     ) -> list[ResumenVentasProducto]:
-        ventas = self._leer("ventas")[["id", "fecha"]]
+        ventas = self._leer("ventas")[["id", "fecha", "almacen"]]
         if desde:
             ventas = ventas[ventas["fecha"].str[:10] >= desde.isoformat()]
         if hasta:
             ventas = ventas[ventas["fecha"].str[:10] <= hasta.isoformat()]
-        detalle = self._leer("ventas_detalle").merge(ventas, left_on="venta_id", right_on="id")
+        if almacen:
+            ventas = ventas[ventas["almacen"].map(normalizar) == normalizar(almacen)]
+        detalle = self._leer("ventas_detalle").merge(ventas[["id", "fecha"]], left_on="venta_id", right_on="id")
         if detalle.empty:
             return []
         detalle = detalle.assign(

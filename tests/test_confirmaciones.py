@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
@@ -10,6 +10,7 @@ from stockmind.application.confirmaciones import (
     MemoriaConfirmacionStore,
     SqliteConfirmacionStore,
     hash_token,
+    hora_local,
 )
 from stockmind.domain.errores import ErrorValidacion, TokenInvalido
 
@@ -178,3 +179,38 @@ def test_auditoria_registra_cada_paso_sin_el_token(servicio, auditoria):
     assert confirmada["resultado"]["saldo"] == 24
     assert confirmada["token"] == hash_token(vista["token"])[:12]
     assert vista["token"] not in auditoria.ruta.read_text(encoding="utf-8")
+
+
+LA_PAZ = timezone(timedelta(hours=-4))
+
+
+def test_horas_en_utc_aunque_los_procesos_usen_otra_zona(tmp_path):
+    """Un proceso emite con un reloj en UTC-4 (La Paz) y otro confirma con uno en UTC: es el mismo instante."""
+    ruta = tmp_path / "stockmind.db"
+    emitido = datetime(2026, 10, 28, 14, 35, 5, tzinfo=LA_PAZ)         # = 18:35:05 UTC
+    token, op = GestorConfirmaciones(SqliteConfirmacionStore(ruta), reloj=lambda: emitido).emitir("t", DATOS)
+    fila = sqlite3.connect(ruta).execute("SELECT creada, vence FROM confirmaciones").fetchone()
+    assert fila == ("2026-10-28T18:35:05.000000+00:00", "2026-10-28T18:45:05.000000+00:00")   # UTC explícito
+
+    otro_proceso = GestorConfirmaciones(SqliteConfirmacionStore(ruta),
+                                        reloj=lambda: datetime(2026, 10, 28, 18, 44, 0, tzinfo=UTC))
+    assert otro_proceso.consumir(token).vence == datetime(2026, 10, 28, 18, 45, 5, tzinfo=UTC)
+
+    token2, _ = GestorConfirmaciones(SqliteConfirmacionStore(ruta), reloj=lambda: emitido).emitir("t", DATOS)
+    tarde = GestorConfirmaciones(SqliteConfirmacionStore(ruta),
+                                 reloj=lambda: datetime(2026, 10, 28, 18, 45, 6, tzinfo=UTC))
+    with pytest.raises(TokenInvalido) as info:
+        tarde.consumir(token2)
+    assert f"venció a las {hora_local(op.vence)}" in str(info.value)    # al usuario, en su hora local
+
+
+def test_hora_local_muestra_la_zona_y_rechaza_datetimes_sin_zona(store):
+    # hora_local usa la zona del sistema; se comprueba contra la conversión de Python.
+    instante = datetime(2026, 10, 28, 18, 45, tzinfo=UTC)
+    esperado = instante.astimezone()
+    assert hora_local(instante).startswith(f"{esperado:%H:%M} (UTC")
+    with pytest.raises(ValueError, match="con zona horaria"):
+        hora_local(datetime(2026, 10, 28, 14, 45))
+    # Un reloj sin zona se rechaza en vez de interpretarse como hora local en silencio.
+    with pytest.raises(ValueError, match="con zona horaria"):
+        GestorConfirmaciones(store, reloj=lambda: datetime(2026, 10, 28, 14, 35)).emitir("t", DATOS)

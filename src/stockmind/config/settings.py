@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import field_validator
+from pydantic import SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # src/stockmind/config/settings.py -> raíz del proyecto.
@@ -37,6 +37,11 @@ class Settings(BaseSettings):
 
     # Moneda de los productos que no informan una (los totales nunca mezclan monedas)
     moneda_base: str = "BOB"
+
+    # Servidor MCP en modo HTTP (stockmind-mcp --http): solo localhost y con token
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8765
+    mcp_token: SecretStr = SecretStr("")
 
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = "INFO"
 

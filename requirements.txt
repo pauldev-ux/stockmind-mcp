@@ -13,3 +13,6 @@ pytest==9.1.1
 
 # Opcional, para conectores que leen de MySQL (probado con SQLAlchemy 2.1.6 y PyMySQL 1.2.3):
 #   pip install -e ".[mysql]"
+
+# Backend del chat con IA (probado con FastAPI 0.162.0, anthropic 2.3.0 y google-genai 2.33.0):
+#   pip install -e ".[api]"

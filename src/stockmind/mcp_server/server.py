@@ -1,11 +1,17 @@
 """Servidor MCP de StockMind (SDK oficial de Python, MCPServer; en mcp 1.x se llamaba FastMCP).
 
-Transporte stdio: stdout es el canal del protocolo, así que todo log va a stderr.
+Transportes:
+- stdio (por defecto, para Claude Desktop): stdout es el canal del protocolo, así
+  que todo log va a stderr.
+- streamable HTTP (`--http`, para el backend del chat): escucha en 127.0.0.1 y
+  exige `Authorization: Bearer <MCP_TOKEN>`, porque expone confirmar_operacion.
 Las tools nunca lanzan errores de negocio: devuelven {"ok": false, ...} con el
 mensaje en español para que la IA se lo explique al usuario.
 """
 
+import argparse
 import functools
+import hmac
 import logging
 import sys
 from collections.abc import Callable
@@ -155,10 +161,9 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     @mcp.tool(annotations=_PREPARAR)
     @_seguro
     def crear_producto(datos: dict[str, Any] | None = None) -> dict[str, Any]:
-        """Prepara la creación de un producto. NO guarda: valida y devuelve una vista previa y un token
-        que vence en 10 minutos. `datos` es un objeto con los campos (ver campos_obligatorios_producto),
-        p. ej. {"nombre": "...", "categoria": "...", "unidad": "...", "precio_venta": 10, "costo": 7}.
-        Crear un producto no crea stock: luego registra una entrada."""
+        """Prepara la creación de un producto (NO guarda: devuelve una vista previa con token, 10 min).
+        `datos`: los campos de campos_obligatorios_producto, p. ej. {"nombre", "categoria", "unidad",
+        "precio_venta", "costo"}. No crea stock: después se registra una entrada."""
         return servicio.preparar_crear_producto(datos or {})
 
     @mcp.tool(annotations=_PREPARAR)
@@ -176,13 +181,10 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
         costo_unitario: float | str | None = None,
         documento: str | None = None,
     ) -> dict[str, Any]:
-        """Prepara un movimiento de inventario. NO guarda: valida y devuelve una vista previa y un token
-        que vence en 10 minutos.
-        - producto: id o código. tipo: entrada | salida | ajuste. cantidad: mayor que 0.
-        - sentido: solo en ajustes, '+' suma o '-' resta.
-        - motivo: obligatorio en salidas y ajustes.
-        - fecha: AAAA-MM-DD, por defecto hoy; no puede ser futura.
-        Rechaza movimientos que dejarían el stock negativo."""
+        """Prepara un movimiento de inventario (NO guarda: devuelve una vista previa con token, 10 min).
+        producto: id o código. tipo: entrada | salida | ajuste. cantidad > 0. sentido ('+'/'-'): solo
+        ajustes. motivo: obligatorio en salidas y ajustes. fecha AAAA-MM-DD (hoy por defecto, no futura).
+        Rechaza el stock negativo."""
         argumentos = {
             "producto_id": producto, "tipo": tipo, "cantidad": cantidad, "sentido": sentido, "motivo": motivo,
             "fecha": fecha, "almacen": almacen, "lote": lote, "fecha_vencimiento": fecha_vencimiento,
@@ -208,8 +210,8 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     @mcp.tool(annotations=_LECTURA)
     @_seguro
     def listar_pendientes(estado: str = "pendiente", tipo: str | None = None) -> dict[str, Any]:
-        """Operaciones de la bandeja de salida. estado: pendiente | registrada | descartada | todas.
-        tipo: productos | movimientos | todos. Las pendientes traen la guía para registrarlas en el ERP."""
+        """Bandeja de salida. estado: pendiente | registrada | descartada | todas; tipo: productos |
+        movimientos | todos. Las pendientes traen la guía para registrarlas en el ERP."""
         return servicio.listar_pendientes(estado, tipo)
 
     @mcp.tool(annotations=_PREPARAR)
@@ -265,9 +267,8 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     def reporte_bajo_stock(dias_ventas: int = 30, dias_objetivo: int = 30, cobertura_menor_a: float | None = None,
                            categoria: str | None = None, almacen: str | None = None,
                            exportar: bool = False) -> dict[str, Any]:
-        """Productos bajo el stock mínimo con días de cobertura (stock / venta diaria de los últimos
-        dias_ventas) y cantidad sugerida a reponer para cubrir dias_objetivo. cobertura_menor_a agrega
-        productos sobre el mínimo pero con poca cobertura."""
+        """Productos bajo el stock mínimo con días de cobertura (stock / venta diaria de dias_ventas) y
+        cantidad sugerida para cubrir dias_objetivo. cobertura_menor_a suma los de poca cobertura."""
         return _reporte(rep.bajo_stock(dias_ventas, dias_objetivo, cobertura_menor_a, categoria, almacen), exportar)
 
     @mcp.tool(annotations=_LECTURA)
@@ -293,9 +294,8 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     def reporte_rotacion(desde: str | None = None, hasta: str | None = None, ultimos_dias: int | None = None,
                          categoria: str | None = None, almacen: str | None = None,
                          exportar: bool = False) -> dict[str, Any]:
-        """Rotación del inventario (costo de lo vendido / inventario promedio), días de inventario y
-        valorización del stock al costo y a precio de venta, total y por categoría, separados por moneda.
-        Período por defecto: últimos 90 días."""
+        """Rotación (costo de lo vendido / inventario promedio), días de inventario y valorización al
+        costo y a precio de venta, por categoría y moneda. Por defecto, últimos 90 días."""
         return _reporte(rep.rotacion(_fecha("desde", desde), _fecha("hasta", hasta), ultimos_dias,
                                      categoria, almacen), exportar)
 
@@ -312,9 +312,42 @@ def crear_servidor(servicio: InventarioService) -> MCPServer:
     return mcp
 
 
-def main() -> None:
+class ExigirToken:
+    """Middleware ASGI: rechaza con 401 toda petición HTTP sin `Authorization: Bearer <token>`."""
+
+    def __init__(self, app: Any, token: str):
+        if not token:
+            raise ValueError("El modo HTTP necesita un MCP_TOKEN no vacío.")
+        self.app = app
+        self._esperado = f"Bearer {token}".encode()
+
+    async def __call__(self, scope: dict, receive: Any, send: Any) -> None:
+        if scope["type"] == "http":
+            recibido = dict(scope.get("headers") or []).get(b"authorization", b"")
+            if not hmac.compare_digest(recibido, self._esperado):
+                from starlette.responses import JSONResponse
+
+                respuesta = JSONResponse({"ok": False, "error": "NoAutorizado",
+                                          "mensaje": "Falta MCP_TOKEN o es incorrecto."}, status_code=401)
+                await respuesta(scope, receive, send)
+                return
+        await self.app(scope, receive, send)
+
+
+def crear_app_http(servidor: MCPServer, token: str, host: str = "127.0.0.1") -> Any:
+    """App ASGI de streamable HTTP (ruta /mcp) protegida con el token."""
+    return ExigirToken(servidor.streamable_http_app(host=host), token)
+
+
+def main(argv: list[str] | None = None) -> None:
     from stockmind.composicion import construir_servicio
     from stockmind.config.settings import get_settings
+
+    parser = argparse.ArgumentParser(prog="stockmind-mcp", description="Servidor MCP de StockMind.")
+    parser.add_argument("--http", action="store_true", help="usar streamable HTTP en vez de stdio")
+    parser.add_argument("--host", help="interfaz HTTP (por defecto MCP_HOST, 127.0.0.1)")
+    parser.add_argument("--port", type=int, help="puerto HTTP (por defecto MCP_PORT, 8765)")
+    args = parser.parse_args(argv)
 
     settings = get_settings()
     logging.basicConfig(
@@ -323,7 +356,20 @@ def main() -> None:
     )
     servicio = construir_servicio(settings, origen="mcp")
     log.info("StockMind MCP con conector '%s'", servicio.conector.nombre)
-    crear_servidor(servicio).run("stdio")
+    servidor = crear_servidor(servicio)
+    if not args.http:
+        servidor.run("stdio")
+        return
+
+    token = settings.mcp_token.get_secret_value()
+    if not token:
+        sys.exit("El modo HTTP necesita MCP_TOKEN en .env (cualquier texto largo y secreto).")
+    import uvicorn
+
+    host, puerto = args.host or settings.mcp_host, args.port or settings.mcp_port
+    log.info("MCP streamable HTTP en http://%s:%s/mcp (requiere MCP_TOKEN)", host, puerto)
+    uvicorn.run(crear_app_http(servidor, token, host), host=host, port=puerto,
+                log_level=settings.log_level.lower(), access_log=False)
 
 
 if __name__ == "__main__":

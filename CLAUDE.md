@@ -247,6 +247,96 @@ composicion.py: único lugar que conoce adaptadores y aplicación (elige por CON
 - **Tests:** `tests/test_reportes.py` usa un CSV armado a mano; los resultados
   están calculados en el docstring.
 
+## Chat con IA (`agente/`, `api/`)
+
+- **El agente es un cliente MCP.** `agente/cliente_mcp.py` usa el SDK oficial:
+  streamable HTTP con `Authorization: Bearer <MCP_TOKEN>`, o en proceso para tests y
+  la consola.
+  - **`agente/` y `api/` no importan `application`, `adapters`, `domain`, `ports` ni
+    `composicion`.** Hay un test que lo verifica. Todo, incluidos los reportes y la
+    bandeja del panel, pasa por las tools MCP.
+- **El servidor MCP en HTTP:** `stockmind-mcp --http` (ruta `/mcp`) escucha en
+  `127.0.0.1` y el middleware `ExigirToken` devuelve 401 sin `MCP_TOKEN`. Sin
+  `--http` sigue en stdio para Claude Desktop.
+- **`LLMProvider`** (`agente/llm.py`) trabaja con un formato neutro (`agente/modelos.py`).
+  - Los mensajes del modelo guardan su `crudo`, que **se reenvía sin cambios** al mismo
+    proveedor (thinking y firmas). A otro proveedor se le envía solo la versión neutra.
+  - Los turnos seguidos del mismo rol se fusionan, con `tool_result` primero.
+  - **Anthropic** (`proveedores/claude.py`):
+    - modelo por defecto `claude-sonnet-5-5`, thinking y `output_config.effort` según `LLM_THINKING`;
+    - caché de prompt automática, `eager_input_streaming` y `fallbacks: "default"` con
+      el beta `server-side-fallback-2026-07-01`;
+    - tras un fallback, se omiten los thinking/tool_use anteriores al último bloque
+      `fallback`.
+  - **Gemini** (`proveedores/gemini.py`):
+    - modelo por defecto `gemini-3.8-flash` (nivel gratuito); `thinking_level` según `LLM_THINKING`;
+    - API sin estado, con la llamada automática de funciones **desactivada**;
+    - todas las `Part` se reenvían tal cual, incluida la `thought_signature`;
+    - una clave inválida llega como **400** `API_KEY_INVALID` (no 401). Los errores
+      incluyen el estado y el mensaje de Gemini, con la clave censurada (`detalle_error`).
+  - **Falso:** responde por guion, para los tests.
+  - **Reintentos y circuit breaker** (`ConReintentos` en `agente/llm.py`; `crear_proveedor`
+    siempre lo pone):
+    - `ErrorLLM(saturado=True)`: 503 (Gemini), 529/503/`overloaded_error` a mitad del stream
+      (Anthropic; llega con HTTP 200) y timeout (`LLM_TIMEOUT_SEGUNDOS`; sin él, el SDK de
+      Gemini esperaba indefinidamente). `reintentable=True` sin saturación: 429.
+    - Un modelo saturado queda en enfriamiento `LLM_ENFRIAMIENTO_SEGUNDOS` (estado en la
+      instancia: vale para todas las vueltas y mensajes) y se usa el siguiente de
+      `LLM_MODELOS_RESPALDO` sin reintentar. Si todos están enfriados, se prueban igual.
+    - Con respaldo, el primero se reintenta 1 vez (solo no saturación); sin respaldo, espera
+      exponencial (`LLM_REINTENTOS`, `LLM_ESPERA_INICIAL`: 2, 4, 8 s). Los SDK van con
+      `max_retries=0` para no reintentar dos veces.
+    - Nunca se reintenta si ya se emitió texto. Cada cambio emite `EventoReintento`, que
+      sale como el evento SSE `reintento`.
+    - Al cambiar de modelo de Gemini, el `crudo` se reenvía tal cual (la documentación pide
+      reenviar los bloques de razonamiento del modelo anterior).
+- **Human in the loop:**
+  - `HERRAMIENTAS_SOLO_USUARIO` (`confirmar_operacion`, `cancelar_operacion`,
+    `marcar_registrada`, `descartar_pendiente`) **nunca se ofrecen al modelo**. Si las
+    pide por nombre, se rechazan sin llegar al MCP.
+  - **Vista previa con token:** se emite `accion_pendiente` (con el token, para el
+    frontend), y el modelo recibe el resultado **sin token** y con `accion_id`.
+  - **Confirmar o cancelar** van por `POST /api/v1/acciones/...`, con el token **en el
+    cuerpo**.
+    - Se verifica que la acción sea de esa conversación y de ese usuario; en SQLite
+      solo se guarda el hash.
+    - La toma es atómica (`pendiente` → `procesando`).
+    - Después se agrega una nota del sistema al historial.
+- **Historial:** `agente/historial.py`, en la misma `data/stockmind.db`, con las tablas
+  `chat_conversaciones`, `chat_mensajes`, `chat_uso_llm` (uso de tokens por llamada) y
+  `chat_acciones`.
+  - El historial solo crece; no se editan mensajes viejos.
+- **Autenticación:** `api/auth.py`, con `TokenEstatico` (`API_TOKEN`) y `JWTFirmado`
+  (HS256; `ERP_JWT_SECRETO` de al menos 32 bytes; `sub` y `exp` obligatorios). El
+  usuario JWT queda como `erp:<sub>`.
+- **Límites:** `MAX_ITERACIONES_TOOLS` por mensaje (después corta con el error
+  `LimiteIteraciones`) y `MAX_LARGO_MENSAJE`.
+- **Vista previa = fin del turno:** si una tool deja una acción pendiente, el agente no vuelve
+  a llamar al modelo en ese mensaje. Antes el modelo tardaba (minutos, con Gemini saturado) y el
+  token de 10 min vencía antes de que la consola preguntara «¿Confirmar?».
+- **Tiempos:** todo instante va en UTC con zona explícita (`exigir_zona`; un datetime sin zona
+  es un error) y al usuario se le muestra en hora local (`hora_local`).
+- **Tokens por llamada:**
+  - thinking `LLM_THINKING` (bajo por defecto). `apagado` = lo mínimo de cada modelo: Gemini
+    `MINIMAL` (o `LOW` en 3.8-flash), Sonnet 5.5 `between_tools`, Opus 5.5 no se apaga;
+  - `compactar_esquema`: sin `title`, sin `default: null`, `anyOf [X, null]` → X (−55 %);
+  - `recortar_para_modelo`: primeras `MAX_FILAS_RESULTADO` filas y `<lista>_total`. El evento
+    `tool_fin` lleva el resultado completo (`datos`, sin token) para el panel;
+  - `ventana_historial`: últimos `HISTORIAL_TURNOS` turnos y un resumen fijo de los anteriores
+    (sin llamada extra). Si recorta, a Anthropic (`contexto_ligado`) se le envían los turnos
+    previos sin `crudo`, porque su thinking queda ligado al prefijo exacto.
+- **Conexiones:** la consola abre una sola sesión MCP; la API usa `ConexionPersistente` (una
+  tarea dueña la abre una vez y la reabre si `ClienteMCP.roto`). Los modelos de respaldo
+  comparten el cliente HTTP del principal. `chat_consola.py --tiempos` mide cada etapa.
+- **Gotchas del SDK MCP:**
+  - lo que se lanza dentro de `async with Client(...)` sale envuelto en
+    `ExceptionGroup`, y `ClienteMCP` lo desenvuelve;
+  - en un helper `evento(**datos)` no uses un parámetro llamado `nombre`, porque choca
+    con los datos de las tools.
+- **Arranque:** `scripts/iniciar.ps1` levanta los dos procesos y los detiene juntos.
+  `scripts/chat_consola.py` es la prueba manual con el proveedor real (gasta cuota: lo
+  corre el autor, no Claude).
+
 ## Conector CSV/Excel
 
 - **Archivos:** `data/{productos,movimientos,ventas,ventas_detalle}.{csv|xlsx}`.
@@ -278,6 +368,9 @@ para predecir.
 
 ## Próximos pasos previstos
 
-- **Backend FastAPI** con chat propio, que reutilice `construir_servicio(origen="web")`.
+- **Panel web en React**, que use la API (`/api/v1`) y los eventos SSE.
+- **Integración en un módulo del ERP**, con JWT firmado por el ERP.
+- **Adaptador OpenAI-compatible** para un modelo local (Ollama o LM Studio), para que
+  los datos del ERP no salgan de la empresa.
 - **Predicción de demanda y punto de reorden**, a partir de `ventas_por_producto`
   y del kardex.

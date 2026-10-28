@@ -21,9 +21,12 @@ dependencies = [
 dev = ["pytest>=8"]
 # Para conectores opcionales que leen de MySQL
 mysql = ["SQLAlchemy>=2.0", "PyMySQL>=1.1"]
+# Backend del chat con IA (FastAPI) y proveedores de IA
+api = ["fastapi>=0.115", "anthropic>=2.3", "google-genai>=2.30"]
 
 [project.scripts]
 stockmind-mcp = "stockmind.mcp_server.server:main"
+stockmind-api = "stockmind.api.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

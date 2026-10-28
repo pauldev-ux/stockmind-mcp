@@ -33,6 +33,21 @@ def ahora_utc() -> datetime:
     return datetime.now(UTC)
 
 
+def exigir_zona(momento: datetime) -> datetime:
+    """Todo instante se maneja con zona explícita y en UTC. Un datetime sin zona es un error de
+    programación: `astimezone()` lo tomaría como hora local y correría el vencimiento 4 h en La Paz."""
+    if momento.tzinfo is None or momento.utcoffset() is None:
+        raise ValueError("Se esperaba un datetime con zona horaria (UTC), no uno sin zona.")
+    return momento.astimezone(UTC)
+
+
+def hora_local(momento: datetime) -> str:
+    """Para mostrar al usuario: «14:45 (UTC-04:00)» en la zona del sistema."""
+    local = exigir_zona(momento).astimezone()
+    desfase = local.strftime("%z")
+    return f"{local:%H:%M} (UTC{desfase[:3]}:{desfase[3:]})"
+
+
 def hash_token(token: str) -> str:
     return hashlib.sha256(token.strip().encode("utf-8")).hexdigest()
 
@@ -104,7 +119,13 @@ class MemoriaConfirmacionStore(ConfirmacionStore):
 
 def _iso(momento: datetime) -> str:
     # Siempre UTC y con microsegundos: así las cadenas se comparan bien en SQL.
-    return momento.astimezone(UTC).isoformat(timespec="microseconds")
+    return exigir_zona(momento).isoformat(timespec="microseconds")
+
+
+def _leer_iso(texto: str) -> datetime:
+    momento = datetime.fromisoformat(texto)
+    # Filas sin zona (no deberían existir): se guardaron en UTC.
+    return momento.replace(tzinfo=UTC) if momento.tzinfo is None else momento.astimezone(UTC)
 
 
 class SqliteConfirmacionStore(ConfirmacionStore):
@@ -137,7 +158,7 @@ class SqliteConfirmacionStore(ConfirmacionStore):
         tipo, datos, creada, vence, estado = fila
         return OperacionPendiente(
             token_hash=token_hash, tipo=tipo, datos=json.loads(datos),
-            creada=datetime.fromisoformat(creada), vence=datetime.fromisoformat(vence),
+            creada=_leer_iso(creada), vence=_leer_iso(vence),
             estado=EstadoOperacion(estado),
         )
 
@@ -179,7 +200,7 @@ class GestorConfirmaciones:
 
     def emitir(self, tipo: str, datos: dict[str, Any]) -> tuple[str, OperacionPendiente]:
         """Guarda la operación pendiente y devuelve el token en claro (solo se muestra esta vez)."""
-        ahora = self.reloj()
+        ahora = exigir_zona(self.reloj())
         self.store.purgar(ahora - timedelta(days=1))
         token = secrets.token_urlsafe(24)
         operacion = OperacionPendiente(token_hash=hash_token(token), tipo=tipo, datos=datos,
@@ -196,7 +217,7 @@ class GestorConfirmaciones:
     def _tomar(self, token: str, nuevo_estado: EstadoOperacion) -> OperacionPendiente:
         if not isinstance(token, str) or not token.strip():
             raise TokenInvalido("Falta el token de confirmación.")
-        ahora = self.reloj()
+        ahora = exigir_zona(self.reloj())
         token_hash = hash_token(token)
         operacion = self.store.tomar(token_hash, ahora, nuevo_estado)
         if operacion is not None:
@@ -212,6 +233,5 @@ class GestorConfirmaciones:
         if operacion.estado == EstadoOperacion.CANCELADA:
             return "Esta operación fue cancelada."
         minutos = int(self.ttl.total_seconds() // 60)
-        hora = operacion.vence.astimezone().strftime("%H:%M")
-        return (f"El token venció a las {hora} (dura {minutos} minutos). "
+        return (f"El token venció a las {hora_local(operacion.vence)} (dura {minutos} minutos). "
                 "Prepara la operación de nuevo para ver una vista previa actualizada.")
